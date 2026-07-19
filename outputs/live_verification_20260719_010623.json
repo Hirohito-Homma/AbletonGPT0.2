@@ -1,0 +1,1370 @@
+{
+  "started_at": "2026-07-19T01:06:23.177284+09:00",
+  "finished_at": "2026-07-19T01:06:49.556974+09:00",
+  "summary": {
+    "passed": 19,
+    "failed": 2,
+    "skipped": 0
+  },
+  "initial_live_state": {
+    "is_playing": false,
+    "tempo": 20.0,
+    "signature": [
+      4,
+      4
+    ],
+    "scene_count": 21,
+    "tracks": [
+      {
+        "index": 0,
+        "name": "1-Audio",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      }
+    ]
+  },
+  "final_live_state": {
+    "is_playing": false,
+    "tempo": 20.0,
+    "signature": [
+      4,
+      4
+    ],
+    "scene_count": 21,
+    "tracks": [
+      {
+        "index": 0,
+        "name": "1-Audio",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 1,
+        "name": "Chords",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 2,
+        "name": "Bass",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 3,
+        "name": "Melody",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 4,
+        "name": "Drums",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 5,
+        "name": "Chords",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 6,
+        "name": "Bass",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 7,
+        "name": "Melody",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 8,
+        "name": "Drums",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 9,
+        "name": "AGPT Context Bass",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 10,
+        "name": "Vocal Guide",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      },
+      {
+        "index": 11,
+        "name": "AGPT Vocal Take",
+        "volume": 0.8500000238418579,
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "clip_slots": 21
+      }
+    ]
+  },
+  "tracks_added": 11,
+  "results": [
+    {
+      "name": "live.connection_and_state",
+      "status": "PASS",
+      "detail": {
+        "is_playing": false,
+        "tempo": 20.0,
+        "signature": [
+          4,
+          4
+        ],
+        "scene_count": 21,
+        "tracks": [
+          {
+            "index": 0,
+            "name": "1-Audio",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          }
+        ]
+      }
+    },
+    {
+      "name": "beginner.plan_four_parts",
+      "status": "PASS",
+      "detail": {
+        "roles": [
+          "chords",
+          "bass",
+          "melody",
+          "drums"
+        ],
+        "note_counts": {
+          "chords": 12,
+          "bass": 16,
+          "melody": 23,
+          "drums": 48
+        },
+        "tempo": 110,
+        "key": "C major"
+      }
+    },
+    {
+      "name": "beginner.create_four_live_tracks",
+      "status": "PASS",
+      "detail": {
+        "title": "AGPT Beginner Verify",
+        "tempo": 110,
+        "key": "C major",
+        "bars": 4,
+        "professional_settings": {
+          "genre": "pop",
+          "mood": "uplifting",
+          "progression_degrees": [
+            1,
+            4,
+            5,
+            1
+          ],
+          "chord_complexity": "triad",
+          "harmonic_rhythm_beats": 4.0,
+          "melody_density": 0.75,
+          "swing": 0.0,
+          "humanize": 0.0,
+          "seed": 0
+        },
+        "created": [
+          {
+            "track_index": 1,
+            "track": "Chords",
+            "clip_index": 0,
+            "clip": "AGPT Beginner Verify - Chords",
+            "length_beats": 16.0,
+            "note_count": 12
+          },
+          {
+            "track_index": 2,
+            "track": "Bass",
+            "clip_index": 0,
+            "clip": "AGPT Beginner Verify - Bass",
+            "length_beats": 16.0,
+            "note_count": 16
+          },
+          {
+            "track_index": 3,
+            "track": "Melody",
+            "clip_index": 0,
+            "clip": "AGPT Beginner Verify - Melody",
+            "length_beats": 16.0,
+            "note_count": 23
+          },
+          {
+            "track_index": 4,
+            "track": "Drums",
+            "clip_index": 0,
+            "clip": "AGPT Beginner Verify - Drums",
+            "length_beats": 16.0,
+            "note_count": 48
+          }
+        ],
+        "instrument_plan": {
+          "genre": "pop",
+          "mood": "uplifting",
+          "live_edition": "unknown",
+          "selections": [
+            {
+              "role": "chords",
+              "role_name_ja": "コード",
+              "selected_instrument": "Wavetable",
+              "candidates": [
+                "Wavetable",
+                "Drift",
+                "Analog",
+                "Electric"
+              ],
+              "reason": "popのコードパートに対して、popの演奏語法とupliftingの質感を両立しやすいためWavetableを選択しました。",
+              "instrument": {
+                "name": "Wavetable",
+                "family": "wavetable_synth",
+                "character": "明るいデジタル音から動きのあるパッド、リードまで対応",
+                "availability": "check_live_edition_and_installation"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "bass",
+              "role_name_ja": "ベース",
+              "selected_instrument": "Drift",
+              "candidates": [
+                "Drift",
+                "Operator",
+                "Wavetable",
+                "Analog"
+              ],
+              "reason": "popのベースパートに対して、popの演奏語法とupliftingの質感を両立しやすいためDriftを選択しました。",
+              "instrument": {
+                "name": "Drift",
+                "family": "analog_synth",
+                "character": "素早く音作りできる、温かく現代的なアナログ系シンセ",
+                "availability": "core_candidate"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "melody",
+              "role_name_ja": "メロディ",
+              "selected_instrument": "Wavetable",
+              "candidates": [
+                "Wavetable",
+                "Drift",
+                "Meld",
+                "Electric"
+              ],
+              "reason": "popのメロディパートに対して、popの演奏語法とupliftingの質感を両立しやすいためWavetableを選択しました。",
+              "instrument": {
+                "name": "Wavetable",
+                "family": "wavetable_synth",
+                "character": "明るいデジタル音から動きのあるパッド、リードまで対応",
+                "availability": "check_live_edition_and_installation"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "drums",
+              "role_name_ja": "ドラム",
+              "selected_instrument": "Drum Rack",
+              "candidates": [
+                "Drum Rack",
+                "Impulse"
+              ],
+              "reason": "popのドラムパートに対して、popの演奏語法とupliftingの質感を両立しやすいためDrum Rackを選択しました。",
+              "instrument": {
+                "name": "Drum Rack",
+                "family": "drum_sampler",
+                "character": "キット、サンプル、Drum Synthをまとめる標準ドラム環境",
+                "availability": "core_candidate"
+              },
+              "requires_content": true,
+              "content_note": "デバイス挿入後にキットまたはサンプルの読み込みが必要です。現在の自動挿入だけではドラム音は確定しません。"
+            }
+          ],
+          "selection_policy": [
+            "ジャンルで音源の基本的な演奏語法を選びます。",
+            "ムードで音色の明暗、質感、アタックの方向を補正します。",
+            "Intro/Standardでは導入可能性の高いコア候補を優先します。",
+            "第一候補を挿入できない場合は、候補順に次の純正音源を試します。"
+          ],
+          "edition_note": "Liveのエディションが不明なため、実際にインストール済みの候補からフォールバックします。",
+          "apply_contract": {
+            "tool": "apply_live_instrument_selection",
+            "requires_confirmation": true,
+            "minimum_live_version": "12.3",
+            "one_track_per_call": true,
+            "deletes_or_replaces_existing_instrument": false
+          }
+        },
+        "next_step": "AIの純正音源候補を確認し、apply_live_instrument_selectionで各トラックへ1つずつ適用してください。"
+      }
+    },
+    {
+      "name": "professional.all_controls_and_reproducibility",
+      "status": "PASS",
+      "detail": {
+        "settings": {
+          "genre": "rnb",
+          "mood": "chill",
+          "progression_degrees": [
+            2,
+            5,
+            1,
+            6
+          ],
+          "chord_complexity": "ninth",
+          "harmonic_rhythm_beats": 2.0,
+          "melody_density": 0.55,
+          "swing": 0.4,
+          "humanize": 0.3,
+          "seed": 42
+        },
+        "ninth_chord_note_count": 40,
+        "melody_note_count": 19,
+        "deterministic": true,
+        "swing_humanize_changed_performance": true
+      }
+    },
+    {
+      "name": "professional.create_four_live_tracks",
+      "status": "PASS",
+      "detail": {
+        "title": "AGPT Pro Verify",
+        "tempo": 92,
+        "key": "D minor",
+        "bars": 4,
+        "professional_settings": {
+          "genre": "rnb",
+          "mood": "chill",
+          "progression_degrees": [
+            2,
+            5,
+            1,
+            6
+          ],
+          "chord_complexity": "ninth",
+          "harmonic_rhythm_beats": 2.0,
+          "melody_density": 0.55,
+          "swing": 0.4,
+          "humanize": 0.3,
+          "seed": 42
+        },
+        "created": [
+          {
+            "track_index": 5,
+            "track": "Chords",
+            "clip_index": 1,
+            "clip": "AGPT Pro Verify - Chords",
+            "length_beats": 16.0,
+            "note_count": 40
+          },
+          {
+            "track_index": 6,
+            "track": "Bass",
+            "clip_index": 1,
+            "clip": "AGPT Pro Verify - Bass",
+            "length_beats": 16.0,
+            "note_count": 8
+          },
+          {
+            "track_index": 7,
+            "track": "Melody",
+            "clip_index": 1,
+            "clip": "AGPT Pro Verify - Melody",
+            "length_beats": 16.0,
+            "note_count": 19
+          },
+          {
+            "track_index": 8,
+            "track": "Drums",
+            "clip_index": 1,
+            "clip": "AGPT Pro Verify - Drums",
+            "length_beats": 16.0,
+            "note_count": 48
+          }
+        ],
+        "instrument_plan": {
+          "genre": "rnb",
+          "mood": "chill",
+          "live_edition": "unknown",
+          "selections": [
+            {
+              "role": "chords",
+              "role_name_ja": "コード",
+              "selected_instrument": "Electric",
+              "candidates": [
+                "Electric",
+                "Analog",
+                "Wavetable",
+                "Drift"
+              ],
+              "reason": "rnbのコードパートに対して、rnbの演奏語法とchillの質感を両立しやすいためElectricを選択しました。",
+              "instrument": {
+                "name": "Electric",
+                "family": "electric_piano",
+                "character": "R&B、Jazz、Lo-fiのコードに合うエレクトリックピアノ",
+                "availability": "check_live_edition_and_installation"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "bass",
+              "role_name_ja": "ベース",
+              "selected_instrument": "Operator",
+              "candidates": [
+                "Operator",
+                "Analog",
+                "Drift",
+                "Wavetable"
+              ],
+              "reason": "rnbのベースパートに対して、rnbの演奏語法とchillの質感を両立しやすいためOperatorを選択しました。",
+              "instrument": {
+                "name": "Operator",
+                "family": "fm_synth",
+                "character": "輪郭のあるベース、ベル、プラックに強いFMシンセ",
+                "availability": "check_live_edition_and_installation"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "melody",
+              "role_name_ja": "メロディ",
+              "selected_instrument": "Electric",
+              "candidates": [
+                "Electric",
+                "Wavetable",
+                "Operator",
+                "Drift"
+              ],
+              "reason": "rnbのメロディパートに対して、rnbの演奏語法とchillの質感を両立しやすいためElectricを選択しました。",
+              "instrument": {
+                "name": "Electric",
+                "family": "electric_piano",
+                "character": "R&B、Jazz、Lo-fiのコードに合うエレクトリックピアノ",
+                "availability": "check_live_edition_and_installation"
+              },
+              "requires_content": false,
+              "content_note": null
+            },
+            {
+              "role": "drums",
+              "role_name_ja": "ドラム",
+              "selected_instrument": "Drum Rack",
+              "candidates": [
+                "Drum Rack",
+                "Impulse"
+              ],
+              "reason": "rnbのドラムパートに対して、rnbの演奏語法とchillの質感を両立しやすいためDrum Rackを選択しました。",
+              "instrument": {
+                "name": "Drum Rack",
+                "family": "drum_sampler",
+                "character": "キット、サンプル、Drum Synthをまとめる標準ドラム環境",
+                "availability": "core_candidate"
+              },
+              "requires_content": true,
+              "content_note": "デバイス挿入後にキットまたはサンプルの読み込みが必要です。現在の自動挿入だけではドラム音は確定しません。"
+            }
+          ],
+          "selection_policy": [
+            "ジャンルで音源の基本的な演奏語法を選びます。",
+            "ムードで音色の明暗、質感、アタックの方向を補正します。",
+            "Intro/Standardでは導入可能性の高いコア候補を優先します。",
+            "第一候補を挿入できない場合は、候補順に次の純正音源を試します。"
+          ],
+          "edition_note": "Liveのエディションが不明なため、実際にインストール済みの候補からフォールバックします。",
+          "apply_contract": {
+            "tool": "apply_live_instrument_selection",
+            "requires_confirmation": true,
+            "minimum_live_version": "12.3",
+            "one_track_per_call": true,
+            "deletes_or_replaces_existing_instrument": false
+          }
+        },
+        "next_step": "AIの純正音源候補を確認し、apply_live_instrument_selectionで各トラックへ1つずつ適用してください。"
+      }
+    },
+    {
+      "name": "part_regeneration.separate_session_slot_ab",
+      "status": "PASS",
+      "detail": {
+        "track_index": 7,
+        "a_slot": 1,
+        "b_slot": 2,
+        "a_note_count": 19,
+        "b_note_count": 15,
+        "different_notes": true,
+        "created": {
+          "track": "Melody",
+          "clip_index": 2,
+          "clip": "AGPT Pro Verify - Melody v43",
+          "length_beats": 16.0,
+          "note_count": 15
+        }
+      }
+    },
+    {
+      "name": "instruments.role_genre_mood_edition_plan",
+      "status": "PASS",
+      "detail": {
+        "edition": "suite",
+        "selections": [
+          {
+            "role": "chords",
+            "selected": "Wavetable",
+            "candidates": [
+              "Wavetable",
+              "Meld",
+              "Operator",
+              "Drift"
+            ]
+          },
+          {
+            "role": "bass",
+            "selected": "Operator",
+            "candidates": [
+              "Operator",
+              "Wavetable",
+              "Meld",
+              "Drift"
+            ]
+          },
+          {
+            "role": "melody",
+            "selected": "Wavetable",
+            "candidates": [
+              "Wavetable",
+              "Meld",
+              "Operator",
+              "Drift"
+            ]
+          },
+          {
+            "role": "drums",
+            "selected": "Drum Rack",
+            "candidates": [
+              "Drum Rack",
+              "Impulse"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "instruments.apply_with_live_availability_fallback",
+      "status": "FAIL",
+      "error": "RuntimeError: Live inserted a device that is not an instrument"
+    },
+    {
+      "name": "contextual.analyze_existing_live_midi",
+      "status": "PASS",
+      "detail": {
+        "source": {
+          "track_index": 1,
+          "track_name": "Chords",
+          "clip_index": 0,
+          "clip_name": "AGPT Beginner Verify - Chords",
+          "length_beats": 16.0,
+          "tempo": 92.0,
+          "note_count": 12,
+          "analyzed_note_count": 12,
+          "fingerprint": "be0042adaa1a0a38"
+        },
+        "musical_context": {
+          "source_role": "chords",
+          "auto_inferred_role": "pad",
+          "role_confidence": {
+            "onset_polyphony_ratio": 1.0,
+            "maximum_notes_at_same_onset": 3,
+            "common_drum_pitch_ratio": 0.0
+          },
+          "key": {
+            "tonic": "C",
+            "tonic_pitch_class": 0,
+            "mode": "major",
+            "confidence": 0.059,
+            "runner_up": "G major"
+          },
+          "pitch_range": {
+            "lowest": 55,
+            "highest": 65,
+            "center": 60.0,
+            "register": "mid"
+          },
+          "rhythm": {
+            "estimated_grid_beats": 2.0,
+            "notes_per_bar": 3.0,
+            "average_duration_beats": 3.8
+          },
+          "expression": {
+            "average_velocity": 74.0,
+            "velocity_range": [
+              72,
+              76
+            ]
+          },
+          "polyphony": {
+            "onset_polyphony_ratio": 1.0,
+            "maximum_notes_at_same_onset": 3
+          },
+          "harmonic_roots": [
+            {
+              "bar": 1,
+              "pitch_class": 0,
+              "name": "C"
+            },
+            {
+              "bar": 2,
+              "pitch_class": 5,
+              "name": "F"
+            },
+            {
+              "bar": 3,
+              "pitch_class": 7,
+              "name": "G"
+            },
+            {
+              "bar": 4,
+              "pitch_class": 0,
+              "name": "C"
+            }
+          ]
+        },
+        "warnings": [
+          "自動推定はpadですが、ユーザー指定のchordsとして解析しました。"
+        ],
+        "read_only": true
+      }
+    },
+    {
+      "name": "contextual.create_new_complementary_track",
+      "status": "PASS",
+      "detail": {
+        "source_analysis": {
+          "source": {
+            "track_index": 1,
+            "track_name": "Chords",
+            "clip_index": 0,
+            "clip_name": "AGPT Beginner Verify - Chords",
+            "length_beats": 16.0,
+            "tempo": 92.0,
+            "note_count": 12,
+            "analyzed_note_count": 12,
+            "fingerprint": "be0042adaa1a0a38"
+          },
+          "musical_context": {
+            "source_role": "chords",
+            "auto_inferred_role": "pad",
+            "role_confidence": {
+              "onset_polyphony_ratio": 1.0,
+              "maximum_notes_at_same_onset": 3,
+              "common_drum_pitch_ratio": 0.0
+            },
+            "key": {
+              "tonic": "C",
+              "tonic_pitch_class": 0,
+              "mode": "major",
+              "confidence": 0.059,
+              "runner_up": "G major"
+            },
+            "pitch_range": {
+              "lowest": 55,
+              "highest": 65,
+              "center": 60.0,
+              "register": "mid"
+            },
+            "rhythm": {
+              "estimated_grid_beats": 2.0,
+              "notes_per_bar": 3.0,
+              "average_duration_beats": 3.8
+            },
+            "expression": {
+              "average_velocity": 74.0,
+              "velocity_range": [
+                72,
+                76
+              ]
+            },
+            "polyphony": {
+              "onset_polyphony_ratio": 1.0,
+              "maximum_notes_at_same_onset": 3
+            },
+            "harmonic_roots": [
+              {
+                "bar": 1,
+                "pitch_class": 0,
+                "name": "C"
+              },
+              {
+                "bar": 2,
+                "pitch_class": 5,
+                "name": "F"
+              },
+              {
+                "bar": 3,
+                "pitch_class": 7,
+                "name": "G"
+              },
+              {
+                "bar": 4,
+                "pitch_class": 0,
+                "name": "C"
+              }
+            ]
+          },
+          "warnings": [
+            "自動推定はpadですが、ユーザー指定のchordsとして解析しました。"
+          ],
+          "read_only": true
+        },
+        "generation": {
+          "target_role": "bass",
+          "genre": "pop",
+          "mood": "uplifting",
+          "key": "C major",
+          "seed": 12,
+          "source_fingerprint": "be0042adaa1a0a38",
+          "strategy": "小節ごとの推定ルートを低音域へ配置し、ジャンルのベース密度を反映します。",
+          "source_onset_collision_ratio": 0.25
+        },
+        "track_index": 9,
+        "clip": {
+          "track": "AGPT Context Bass",
+          "clip_index": 0,
+          "clip": "AGPT Context Bass - Generated",
+          "length_beats": 16.0,
+          "note_count": 16
+        },
+        "instrument_selection": {
+          "role": "bass",
+          "role_name_ja": "ベース",
+          "selected_instrument": "Drift",
+          "candidates": [
+            "Drift",
+            "Operator",
+            "Wavetable",
+            "Analog"
+          ],
+          "reason": "popのベースパートに対して、popの演奏語法とupliftingの質感を両立しやすいためDriftを選択しました。",
+          "instrument": {
+            "name": "Drift",
+            "family": "analog_synth",
+            "character": "素早く音作りできる、温かく現代的なアナログ系シンセ",
+            "availability": "core_candidate"
+          },
+          "requires_content": false,
+          "content_note": null
+        },
+        "next_step": "生成結果を再生して確認し、必要ならseedを変えて別Sessionスロットへ生成してください。"
+      }
+    },
+    {
+      "name": "live_control.tempo_transport_arm_clip",
+      "status": "FAIL",
+      "error": "AssertionError: "
+    },
+    {
+      "name": "mix.volume_pan_mute_solo_send_meter_snapshot",
+      "status": "PASS",
+      "detail": {
+        "changed": {
+          "index": 2,
+          "name": "Bass",
+          "volume": 0.6299999952316284,
+          "pan": -0.20000000298023224,
+          "mute": true,
+          "solo": true,
+          "output_meter_level": 0.0,
+          "sends": [
+            {
+              "index": 0,
+              "value": 0.0
+            },
+            {
+              "index": 1,
+              "value": 0.0
+            },
+            {
+              "index": 2,
+              "value": 0.0
+            }
+          ]
+        },
+        "send_values_readable": true,
+        "send_write_tool_available": false,
+        "restored": true
+      }
+    },
+    {
+      "name": "effects.insert_list_power_parameter_reset",
+      "status": "PASS",
+      "detail": {
+        "inserted": {
+          "track": "Melody",
+          "index": 1,
+          "name": "Auto Filter",
+          "class_display_name": "Auto Filter",
+          "type": 2,
+          "device_count": 2
+        },
+        "listed_device_count": 2,
+        "power_cycle": true,
+        "parameter": "Frequency",
+        "normalized_value_after_change": 0.3500000238418579,
+        "value_after_reset": 0.8996566534042358
+      }
+    },
+    {
+      "name": "vocal.lyrics_guide_render_contract",
+      "status": "PASS",
+      "detail": {
+        "language": "ja",
+        "event_count": 28,
+        "render_contract": {
+          "preferred_format": "WAV",
+          "sample_rate": 48000,
+          "bit_depth": 24,
+          "dry_vocal": true,
+          "tempo_sync_required": true,
+          "start_at_bar_one": true
+        }
+      }
+    },
+    {
+      "name": "vocal.create_live_midi_guide",
+      "status": "PASS",
+      "detail": {
+        "track_index": 10,
+        "clip": {
+          "track": "Vocal Guide",
+          "clip_index": 3,
+          "clip": "AGPT Vocal Verify - Vocal Guide",
+          "length_beats": 16.0,
+          "note_count": 28
+        },
+        "vocal_events": [
+          {
+            "lyric": "あ",
+            "pitch": 60,
+            "start_time": 0.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "し",
+            "pitch": 79,
+            "start_time": 0.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "た",
+            "pitch": 60,
+            "start_time": 1.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "へ",
+            "pitch": 62,
+            "start_time": 1.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "進",
+            "pitch": 60,
+            "start_time": 2.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "も",
+            "pitch": 62,
+            "start_time": 2.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "う",
+            "pitch": 60,
+            "start_time": 3.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "あ",
+            "pitch": 60,
+            "start_time": 3.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "し",
+            "pitch": 69,
+            "start_time": 4.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "た",
+            "pitch": 62,
+            "start_time": 4.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "へ",
+            "pitch": 69,
+            "start_time": 5.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "進",
+            "pitch": 77,
+            "start_time": 5.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "も",
+            "pitch": 72,
+            "start_time": 6.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "う",
+            "pitch": 69,
+            "start_time": 7.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "あ",
+            "pitch": 81,
+            "start_time": 8.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "し",
+            "pitch": 62,
+            "start_time": 9.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "た",
+            "pitch": 60,
+            "start_time": 9.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "へ",
+            "pitch": 67,
+            "start_time": 10.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "進",
+            "pitch": 71,
+            "start_time": 10.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "も",
+            "pitch": 67,
+            "start_time": 11.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "う",
+            "pitch": 64,
+            "start_time": 11.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "あ",
+            "pitch": 60,
+            "start_time": 12.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "し",
+            "pitch": 64,
+            "start_time": 12.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "た",
+            "pitch": 64,
+            "start_time": 13.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "へ",
+            "pitch": 69,
+            "start_time": 13.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "進",
+            "pitch": 67,
+            "start_time": 14.5,
+            "duration": 0.42,
+            "velocity": 84
+          },
+          {
+            "lyric": "も",
+            "pitch": 60,
+            "start_time": 15.0,
+            "duration": 0.42,
+            "velocity": 92
+          },
+          {
+            "lyric": "う",
+            "pitch": 79,
+            "start_time": 15.5,
+            "duration": 0.42,
+            "velocity": 84
+          }
+        ],
+        "render_contract": {
+          "preferred_format": "WAV",
+          "sample_rate": 48000,
+          "bit_depth": 24,
+          "dry_vocal": true,
+          "tempo_sync_required": true,
+          "start_at_bar_one": true
+        },
+        "next_step": "歌声エンジンでドライWAVを書き出し、import_vocal_takeでLiveへ戻してください。"
+      }
+    },
+    {
+      "name": "audio.generate_verification_wav_and_aiff",
+      "status": "PASS",
+      "detail": {
+        "wav": "/private/tmp/abletongpt-verification-vocal.wav",
+        "aiff": "/private/tmp/abletongpt-verification-tone.aiff"
+      }
+    },
+    {
+      "name": "vocal.import_rendered_wav_to_new_audio_track",
+      "status": "PASS",
+      "detail": {
+        "track_index": 11,
+        "track": "AGPT Vocal Take",
+        "clip_index": 4,
+        "clip": "AGPT Placeholder Render",
+        "file_path": "/private/tmp/abletongpt-verification-vocal.wav",
+        "length": 8.0
+      }
+    },
+    {
+      "name": "loudness.wav_aiff_all_metrics_read_only",
+      "status": "PASS",
+      "detail": {
+        "wav": {
+          "file": {
+            "path": "/private/tmp/abletongpt-verification-vocal.wav",
+            "name": "abletongpt-verification-vocal.wav",
+            "container": "WAV",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bit_depth": 24,
+            "duration_seconds": 4.0
+          },
+          "standard": {
+            "loudness": "ITU-R BS.1770 K-weighting with EBU R128 gating",
+            "momentary_window_seconds": 0.4,
+            "short_term_window_seconds": 3.0,
+            "true_peak": "4x cubic inter-sample estimate; not a certified delivery meter"
+          },
+          "measurements": {
+            "integrated_lufs": -20.73,
+            "loudness_range_lu": 0.0,
+            "max_momentary_lufs": -20.73,
+            "max_short_term_lufs": -20.73,
+            "sample_peak_dbfs": -20.0,
+            "true_peak_dbtp": -20.0,
+            "rms_dbfs": -23.01,
+            "crest_factor_db": 3.01
+          },
+          "analysis": {
+            "target_lufs": -14.0,
+            "target_true_peak_dbtp": -1.0,
+            "gain_to_target_db": 6.73,
+            "predicted_true_peak_dbtp": -13.27,
+            "peak_control_likely_required": false,
+            "notes": [
+              "単純なゲイン変更後も推定True Peakは指定上限内です。",
+              "数値合わせだけでなく、ラウドネスマッチしたA/B試聴で判断してください。"
+            ]
+          },
+          "quality_notes": [
+            "Mono/stereo channel weighting is unambiguous.",
+            "最終納品では認証済みTrue Peakメーターとの照合を推奨します。",
+            "LUFS目標はジャンル、マスターの意図、配信仕様と聴感を合わせて決めてください。"
+          ],
+          "read_only": true
+        },
+        "aiff": {
+          "file": {
+            "path": "/private/tmp/abletongpt-verification-tone.aiff",
+            "name": "abletongpt-verification-tone.aiff",
+            "container": "AIFF",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bit_depth": 16,
+            "duration_seconds": 4.0
+          },
+          "standard": {
+            "loudness": "ITU-R BS.1770 K-weighting with EBU R128 gating",
+            "momentary_window_seconds": 0.4,
+            "short_term_window_seconds": 3.0,
+            "true_peak": "4x cubic inter-sample estimate; not a certified delivery meter"
+          },
+          "measurements": {
+            "integrated_lufs": -20.04,
+            "loudness_range_lu": 0.0,
+            "max_momentary_lufs": -20.04,
+            "max_short_term_lufs": -20.04,
+            "sample_peak_dbfs": -20.0,
+            "true_peak_dbtp": -20.0,
+            "rms_dbfs": -23.01,
+            "crest_factor_db": 3.01
+          },
+          "analysis": {
+            "target_lufs": -14.0,
+            "target_true_peak_dbtp": -1.0,
+            "gain_to_target_db": 6.04,
+            "predicted_true_peak_dbtp": -13.96,
+            "peak_control_likely_required": false,
+            "notes": [
+              "単純なゲイン変更後も推定True Peakは指定上限内です。",
+              "数値合わせだけでなく、ラウドネスマッチしたA/B試聴で判断してください。"
+            ]
+          },
+          "quality_notes": [
+            "Mono/stereo channel weighting is unambiguous.",
+            "最終納品では認証済みTrue Peakメーターとの照合を推奨します。",
+            "LUFS目標はジャンル、マスターの意図、配信仕様と聴感を合わせて決めてください。"
+          ],
+          "read_only": true
+        },
+        "source_hashes_unchanged": true
+      }
+    },
+    {
+      "name": "safety.localhost_token_validation_no_destructive_surface",
+      "status": "PASS",
+      "detail": {
+        "bridge_host": "127.0.0.1",
+        "shared_token_configured": true,
+        "wrong_token_rejected": "unauthorized",
+        "delete_command_rejected": "unsupported command: delete_track",
+        "code_execution_command_rejected": "unsupported command: execute_python",
+        "invalid_tempo_rejected": "bpm must be between 20 and 999",
+        "invalid_note_rejected": "note pitch must be between 0 and 127",
+        "occupied_clip_overwrite_rejected": "target clip slot is not empty",
+        "mcp_tool_count": 33,
+        "destructive_or_code_tools": []
+      }
+    },
+    {
+      "name": "cleanup.restore_initial_tempo_and_transport",
+      "status": "PASS",
+      "detail": {
+        "tempo": 20.0,
+        "is_playing": false
+      }
+    },
+    {
+      "name": "final.live_state",
+      "status": "PASS",
+      "detail": {
+        "is_playing": false,
+        "tempo": 20.0,
+        "signature": [
+          4,
+          4
+        ],
+        "scene_count": 21,
+        "tracks": [
+          {
+            "index": 0,
+            "name": "1-Audio",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 1,
+            "name": "Chords",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 2,
+            "name": "Bass",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 3,
+            "name": "Melody",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 4,
+            "name": "Drums",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 5,
+            "name": "Chords",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 6,
+            "name": "Bass",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 7,
+            "name": "Melody",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 8,
+            "name": "Drums",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 9,
+            "name": "AGPT Context Bass",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 10,
+            "name": "Vocal Guide",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          },
+          {
+            "index": 11,
+            "name": "AGPT Vocal Take",
+            "volume": 0.8500000238418579,
+            "mute": false,
+            "solo": false,
+            "arm": false,
+            "clip_slots": 21
+          }
+        ]
+      }
+    }
+  ]
+}

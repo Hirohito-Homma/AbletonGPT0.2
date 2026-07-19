@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "AbletonGPT": {
+      "command": "/ABSOLUTE/PATH/TO/AbletonGPT/.venv/bin/abletongpt",
+      "args": []
+    }
+  }
+}
+
