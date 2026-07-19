@@ -21,14 +21,19 @@ class ExtensionsBridgeConfig:
     token: str = ""
     timeout: float = 3.0
 
+    def __post_init__(self) -> None:
+        if self.host not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Ableton Extensions bridge host must be localhost")
+        if not 1 <= self.port <= 65535:
+            raise ValueError("Ableton Extensions bridge port must be between 1 and 65535")
+        if self.timeout <= 0:
+            raise ValueError("Ableton Extensions bridge timeout must be positive")
+
     @classmethod
     def load(cls) -> "ExtensionsBridgeConfig":
         values = load_config_file()
-        host = str(setting("extensions_host", "127.0.0.1", values))
-        if host not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("Ableton Extensions bridge host must be localhost")
         return cls(
-            host=host,
+            host=str(setting("extensions_host", "127.0.0.1", values)),
             port=int(setting("extensions_port", 9878, values)),
             token=str(setting("extensions_token", setting("token", "", values), values)),
             timeout=float(setting("extensions_timeout", 3.0, values)),
