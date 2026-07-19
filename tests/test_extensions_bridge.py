@@ -65,10 +65,8 @@ def test_extensions_bridge_round_trip() -> None:
 
 
 def test_extensions_bridge_rejects_remote_host() -> None:
-    config = ExtensionsBridgeConfig(host="example.com")
-    bridge = ExtensionsBridge(config)
-    with pytest.raises(ExtensionsConnectionError):
-        bridge.call("ping")
+    with pytest.raises(ValueError, match="localhost"):
+        ExtensionsBridgeConfig(host="example.com")
 
 
 def test_extensions_bridge_reports_connection_failure() -> None:
