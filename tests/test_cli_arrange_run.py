@@ -1017,6 +1017,70 @@ def test_arrange_run_describe_style_human_summary_handles_tempo_less_style(capsy
     assert "56 bar" in out
 
 
+def test_arrange_run_describe_style_human_prints_section_timeline(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "deep-house"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    lines = capsys.readouterr().out.splitlines()
+    # A line per section follows the two summary lines.
+    section_lines = [ln for ln in lines if ln.startswith("  ")]
+    assert len(section_lines) == 7
+    joined = "\n".join(section_lines)
+    # Each timed section shows its inclusive bar span and a start-end (duration) clock.
+    assert "intro" in joined
+    assert "bars 1-8" in joined
+    assert "0:00-0:16 (0:16)" in joined
+    # The last section ends at the total length (2:06 for deep-house's 64 bars @122).
+    assert "2:06" in joined
+
+
+def test_arrange_run_describe_style_human_timeline_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    # No tempo -> sections fall back to a bar count instead of clock times, no crash.
+    rc = main(
+        ["arrange-run", "--describe-style", "dark-tech-house"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    section_lines = [
+        ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("  ")
+    ]
+    assert len(section_lines) == 5
+    joined = "\n".join(section_lines)
+    assert "intro" in joined
+    assert "8 bar(s)" in joined
+    # No clock times: a tempo-less style can't show 0:00-style start/end/duration.
+    assert "0:00" not in joined
+    assert "(0:" not in joined
+
+
+def test_arrange_run_describe_all_styles_human_stays_compact(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    lines = capsys.readouterr().out.splitlines()
+    # The all-styles overview stays a two-line-per-style summary: no indented
+    # per-section timeline lines (that detail is reserved for a single --describe-style).
+    assert not any(ln.startswith("  ") for ln in lines)
+    # deep-house's distinctive section id must not leak into the compact overview.
+    assert "groove_a" not in "\n".join(lines)
+
+
 def test_arrange_run_describe_style_does_not_save_or_execute(tmp_path: Path, capsys):
     out = tmp_path / "plan.json"
     executor = FakeExecutor()

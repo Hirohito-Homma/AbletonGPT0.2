@@ -268,6 +268,30 @@ def _style_summary_line(description: dict[str, object]) -> str:
     )
 
 
+def _section_line(section: dict[str, object]) -> str:
+    """One indented human line for a section: its bar span, and clock span when timed.
+
+    The bar range is inclusive (``end_bar`` is exclusive, so the last bar is
+    ``end_bar - 1``). Start/duration clock times are appended only when the style has a
+    tempo; without one they are ``null`` and the line falls back to the bar count.
+    """
+    start_bar = section["start_bar"]
+    last_bar = section["end_bar"] - 1
+    bars = (
+        "bar %d" % start_bar
+        if start_bar == last_bar
+        else "bars %d-%d" % (start_bar, last_bar)
+    )
+    start = section["start_formatted"]
+    duration = section["duration_formatted"]
+    if start is not None and duration is not None:
+        end = _duration_label(section["start_seconds"] + section["duration_seconds"])
+        timing = "%s-%s (%s)" % (start, end, duration)
+    else:
+        timing = "%d bar(s)" % section["length_bars"]
+    return "  %-14s %-11s %s" % (section["section_id"], bars, timing)
+
+
 def _print_style_description(style: str, *, as_json: bool = False) -> None:
     """Print a compact summary for one registered arrange-run style."""
     description = _style_description(style)
@@ -276,6 +300,8 @@ def _print_style_description(style: str, *, as_json: bool = False) -> None:
         return
     print("style: %s" % description["style"])
     print(_style_summary_line(description))
+    for section in description["sections"]:
+        print(_section_line(section))
 
 
 def _print_all_style_descriptions(*, as_json: bool = False) -> None:
