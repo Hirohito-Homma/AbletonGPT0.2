@@ -154,3 +154,135 @@ def test_arrange_run_returns_exit_code_1_on_failure(tmp_path: Path):
     assert all(
         statuses[sid] is StepStatus.PENDING for sid in _DEFAULT_STEP_IDS[2:]
     )
+
+
+# --- musical parameters: --tempo -------------------------------------------------
+
+def _tempo_steps(plan) -> list:
+    return [step for step in plan.steps if step.command == "set_tempo"]
+
+
+def test_tempo_adds_set_tempo_step_to_job_plan(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--job-path", str(out), "--tempo", "126"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    plan = load_job_plan(out)
+    tempo_steps = _tempo_steps(plan)
+    assert len(tempo_steps) == 1
+    assert tempo_steps[0].params["bpm"] == 126
+    # The tempo step runs first, before any scene is placed.
+    assert plan.steps[0].command == "set_tempo"
+    assert executor.executed[0] == tempo_steps[0].step_id
+
+
+def test_dry_run_tempo_is_reported_and_not_executed(tmp_path: Path, capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--dry-run", "--tempo", "126"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert "tempo=126" in capsys.readouterr().out
+
+
+# --- musical parameters: --bars --------------------------------------------------
+
+def test_bars_scales_total_arrangement_length(tmp_path: Path):
+    out = tmp_path / "plan.json"
+
+    rc = main(
+        ["arrange-run", "--job-path", str(out), "--bars", "64"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc == 0
+    plan = load_job_plan(out)
+    total = sum(
+        step.params["length_bars"]
+        for step in plan.steps
+        if step.command == "place_scene"
+    )
+    assert total == 64
+    # Sections stay contiguous and 1-based after rescaling.
+    scene_steps = [s for s in plan.steps if s.command == "place_scene"]
+    assert scene_steps[0].params["start_bar"] == 1
+    bars_seen = [
+        (s.params["start_bar"], s.params["length_bars"]) for s in scene_steps
+    ]
+    for (start, length), (next_start, _) in zip(bars_seen, bars_seen[1:]):
+        assert start + length == next_start
+
+
+def test_dry_run_bars_is_reported(capsys):
+    rc = main(
+        ["arrange-run", "--dry-run", "--bars", "64"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc == 0
+    assert "64 bar" in capsys.readouterr().out
+
+
+# --- musical parameters: --name --------------------------------------------------
+
+def test_name_is_reflected_in_job_plan(tmp_path: Path, capsys):
+    out = tmp_path / "plan.json"
+
+    rc = main(
+        ["arrange-run", "--dry-run", "--name", "test_song"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc == 0
+    assert "test_song" in capsys.readouterr().out
+
+    # And it lands on the persisted plan too.
+    rc2 = main(
+        ["arrange-run", "--job-path", str(out), "--name", "test_song"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc2 == 0
+    assert load_job_plan(out).name == "test_song"
+
+
+# --- resume precedence over new parameters ---------------------------------------
+
+def test_resume_ignores_new_tempo_and_bars(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    # Seed an existing plan generated at tempo 120 / 56 bars.
+    seed = build_job_plan(simple_arrangement("seeded", tempo=120))
+    save_job_plan(seed, out)
+
+    executor = FakeExecutor()
+    rc = main(
+        [
+            "arrange-run",
+            "--job-path",
+            str(out),
+            "--resume",
+            "--tempo",
+            "130",
+            "--bars",
+            "999",
+            "--name",
+            "regenerated",
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    plan = load_job_plan(out)
+    # The on-disk plan won: name, tempo, and length are all unchanged.
+    assert plan.name == "seeded"
+    tempo_steps = _tempo_steps(plan)
+    assert len(tempo_steps) == 1
+    assert tempo_steps[0].params["bpm"] == 120
+    assert plan.step_ids == seed.step_ids

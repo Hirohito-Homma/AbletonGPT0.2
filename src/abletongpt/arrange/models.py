@@ -22,6 +22,9 @@ class ArrangementPlan:
 
     name: str
     sections: tuple[ArrangementSection, ...] = ()
+    #: Optional song tempo in BPM. ``None`` means "leave the Live Set's tempo alone";
+    #: when set, ``build_job_plan`` emits a leading ``set_tempo`` step.
+    tempo: float | None = None
 
     @property
     def total_bars(self) -> int:
