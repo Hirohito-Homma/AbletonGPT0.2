@@ -253,6 +253,21 @@ def _style_description(style: str) -> dict[str, object]:
     }
 
 
+def _style_summary_line(description: dict[str, object]) -> str:
+    """One-line human summary of a style description.
+
+    Tempo renders as ``none`` when the style carries no tempo (e.g. dark-tech-house);
+    formatting it with ``%g`` unconditionally would raise on that ``None``.
+    """
+    tempo = description["tempo"]
+    return "job plan '%s' with %d step(s), tempo=%s, %d bar(s)" % (
+        description["name"],
+        description["step_count"],
+        ("%g" % tempo) if tempo is not None else "none",
+        description["total_bars"],
+    )
+
+
 def _print_style_description(style: str, *, as_json: bool = False) -> None:
     """Print a compact summary for one registered arrange-run style."""
     description = _style_description(style)
@@ -260,15 +275,7 @@ def _print_style_description(style: str, *, as_json: bool = False) -> None:
         print(json.dumps(description, indent=2, sort_keys=True))
         return
     print("style: %s" % description["style"])
-    print(
-        "job plan '%s' with %d step(s), tempo=%g, %d bar(s)"
-        % (
-            description["name"],
-            description["step_count"],
-            description["tempo"],
-            description["total_bars"],
-        )
-    )
+    print(_style_summary_line(description))
 
 
 def _print_all_style_descriptions(*, as_json: bool = False) -> None:
@@ -280,19 +287,7 @@ def _print_all_style_descriptions(*, as_json: bool = False) -> None:
 
     for description in descriptions:
         print("style: %s" % description["style"])
-        print(
-            "job plan '%s' with %d step(s), tempo=%s, %d bar(s)"
-            % (
-                description["name"],
-                description["step_count"],
-                (
-                    "%g" % description["tempo"]
-                    if description["tempo"] is not None
-                    else "none"
-                ),
-                description["total_bars"],
-            )
-        )
+        print(_style_summary_line(description))
 
 
 # --- arrange-run orchestration ---------------------------------------------------

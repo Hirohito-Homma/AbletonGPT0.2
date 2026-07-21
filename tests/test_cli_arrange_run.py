@@ -998,6 +998,25 @@ def test_arrange_run_describe_style_prints_style_summary(capsys):
     assert "64 bar" in out
 
 
+def test_arrange_run_describe_style_human_summary_handles_tempo_less_style(capsys):
+    executor = FakeExecutor()
+
+    # dark-tech-house has no tempo. The human (non-JSON) summary must render it as
+    # "tempo=none" rather than crashing on a None -> %g format.
+    rc = main(
+        ["arrange-run", "--describe-style", "dark-tech-house"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    out = capsys.readouterr().out
+    assert "style: dark-tech-house" in out
+    assert "job plan 'dark_tech_house'" in out
+    assert "tempo=none" in out
+    assert "56 bar" in out
+
+
 def test_arrange_run_describe_style_does_not_save_or_execute(tmp_path: Path, capsys):
     out = tmp_path / "plan.json"
     executor = FakeExecutor()
