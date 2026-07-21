@@ -859,13 +859,13 @@ def test_arrange_run_describe_style_json_prints_machine_readable_summary(capsys)
     assert rc == 0
     assert executor.executed == []
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {
-        "style": "dub-techno",
-        "name": "dub_techno",
-        "step_count": 8,
-        "tempo": 124.0,
-        "total_bars": 64,
-    }
+    assert payload["style"] == "dub-techno"
+    assert payload["name"] == "dub_techno"
+    assert payload["step_count"] == 8
+    assert payload["tempo"] == 124.0
+    assert payload["total_bars"] == 64
+    assert payload["sections"]
+    assert sum(section["length_bars"] for section in payload["sections"]) == 64
 
 
 def test_arrange_run_describe_style_json_does_not_save_or_execute(
@@ -985,3 +985,51 @@ def test_arrange_run_describe_all_styles_json_does_not_save_or_execute(
     payload = json.loads(captured.out)
     assert [entry["style"] for entry in payload["styles"]] == list(available_styles())
     assert captured.err == ""
+
+def test_arrange_run_describe_style_json_includes_sections(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "dub-techno", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+
+    sections = payload["sections"]
+    assert sections
+    assert sections[0]["start_bar"] == 1
+    assert set(sections[0].keys()) == {
+        "section_id",
+        "name",
+        "source_scene",
+        "start_bar",
+        "length_bars",
+        "transition",
+        "tags",
+    }
+    assert sum(section["length_bars"] for section in sections) == payload["total_bars"]
+
+
+def test_arrange_run_describe_all_styles_json_includes_sections(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+
+    by_style = {entry["style"]: entry for entry in payload["styles"]}
+    for style in available_styles():
+        sections = by_style[style]["sections"]
+        assert sections
+        assert sections[0]["start_bar"] == 1
+        assert sum(section["length_bars"] for section in sections) == by_style[style][
+            "total_bars"
+        ]
