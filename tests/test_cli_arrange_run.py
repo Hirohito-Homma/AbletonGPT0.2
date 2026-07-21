@@ -894,3 +894,43 @@ def test_arrange_run_describe_style_json_does_not_save_or_execute(
     assert payload["name"] == "minimal_techno"
     assert payload["tempo"] == 126.0
     assert payload["total_bars"] == 64
+
+def test_arrange_run_list_styles_json_prints_machine_readable_style_list(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--list-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"styles": list(available_styles())}
+
+
+def test_arrange_run_list_styles_json_exits_before_style_validation_and_saving(
+    tmp_path: Path, capsys
+):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--list-styles",
+            "--json",
+            "--style",
+            "unknown",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert not out.exists()
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"styles": list(available_styles())}
+    assert captured.err == ""
