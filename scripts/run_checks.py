@@ -31,6 +31,9 @@ def main() -> None:
 
     for module_name in (
         "abletongpt.bridge",
+        "abletongpt.cli.arrange",
+        "abletongpt.cli.jobs",
+        "abletongpt.cli.serialization",
         "abletongpt.composition",
         "abletongpt.config",
         "abletongpt.contextual",
@@ -54,7 +57,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 11, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 14, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 
