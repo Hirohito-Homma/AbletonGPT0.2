@@ -934,3 +934,54 @@ def test_arrange_run_list_styles_json_exits_before_style_validation_and_saving(
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"styles": list(available_styles())}
     assert captured.err == ""
+
+def test_arrange_run_describe_all_styles_json_prints_machine_readable_summaries(
+    capsys,
+):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert set(payload.keys()) == {"styles"}
+    assert [entry["style"] for entry in payload["styles"]] == list(available_styles())
+
+    by_style = {entry["style"]: entry for entry in payload["styles"]}
+    assert by_style["dark-tech-house"]["name"] == "dark_tech_house"
+    assert by_style["dark-tech-house"]["total_bars"] == 56
+    assert by_style["dub-techno"]["name"] == "dub_techno"
+    assert by_style["dub-techno"]["tempo"] == 124.0
+    assert by_style["dub-techno"]["total_bars"] == 64
+
+
+def test_arrange_run_describe_all_styles_json_does_not_save_or_execute(
+    tmp_path: Path, capsys
+):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--describe-all-styles",
+            "--json",
+            "--style",
+            "unknown",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert not out.exists()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert [entry["style"] for entry in payload["styles"]] == list(available_styles())
+    assert captured.err == ""
