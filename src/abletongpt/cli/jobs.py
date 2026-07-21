@@ -202,13 +202,16 @@ def _style_description(style: str) -> dict[str, object]:
     arrangement = arrangement_for_style(style, None)
     plan = build_job_plan(arrangement)
     sections = _section_summaries(arrangement)
+    tempo = _tempo_of(plan)
+    total_bars = _total_bars_of(plan)
     return {
         "style": style,
         "name": plan.name,
         "step_count": len(plan.steps),
         "section_count": len(sections),
-        "tempo": _tempo_of(plan),
-        "total_bars": _total_bars_of(plan),
+        "tempo": tempo,
+        "total_bars": total_bars,
+        "duration_seconds": _duration_seconds(tempo, total_bars),
         "sections": sections,
     }
 
