@@ -1197,6 +1197,8 @@ def test_arrange_run_describe_style_json_includes_sections(capsys):
         "start_bar",
         "length_bars",
         "end_bar",
+        "start_seconds",
+        "start_formatted",
         "duration_seconds",
         "duration_formatted",
         "transition",
@@ -1261,6 +1263,66 @@ def test_describe_style_json_section_duration_null_without_tempo(capsys):
     for section in sections:
         assert section["duration_seconds"] is None
         assert section["duration_formatted"] is None
+
+
+def test_describe_style_json_sections_carry_start_time(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "deep-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    # The first section starts at the very top.
+    assert sections[0]["start_bar"] == 1
+    assert sections[0]["start_seconds"] == 0.0
+    assert sections[0]["start_formatted"] == "0:00"
+    # Each section's start is its elapsed bars (start_bar - 1) at the tempo (122 BPM),
+    # computed from the absolute position rather than accumulated rounding.
+    for section in sections:
+        assert section["start_seconds"] == round(
+            (section["start_bar"] - 1) * 4 * 60 / 122, 3
+        )
+
+
+def test_dry_run_json_sections_carry_start_time(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    assert all("start_seconds" in s and "start_formatted" in s for s in sections)
+    assert sections[0]["start_seconds"] == 0.0
+    # Second section begins exactly where the first ends.
+    assert sections[1]["start_seconds"] == round(
+        (sections[1]["start_bar"] - 1) * 4 * 60 / 122, 3
+    )
+
+
+def test_describe_style_json_section_start_time_null_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    # No tempo -> start time is undefined (null) for every section, like duration.
+    rc = main(
+        ["arrange-run", "--describe-style", "dark-tech-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    assert sections
+    for section in sections:
+        assert section["start_seconds"] is None
+        assert section["start_formatted"] is None
 
 
 def test_arrange_run_describe_all_styles_json_includes_sections(capsys):
