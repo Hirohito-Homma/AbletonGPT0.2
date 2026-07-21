@@ -185,6 +185,30 @@ def _print_style_description(style: str, *, as_json: bool = False) -> None:
     )
 
 
+def _print_all_style_descriptions(*, as_json: bool = False) -> None:
+    """Print compact summaries for every registered arrange-run style."""
+    descriptions = [_style_description(style) for style in available_styles()]
+    if as_json:
+        print(json.dumps({"styles": descriptions}, indent=2, sort_keys=True))
+        return
+
+    for description in descriptions:
+        print("style: %s" % description["style"])
+        print(
+            "job plan '%s' with %d step(s), tempo=%s, %d bar(s)"
+            % (
+                description["name"],
+                description["step_count"],
+                (
+                    "%g" % description["tempo"]
+                    if description["tempo"] is not None
+                    else "none"
+                ),
+                description["total_bars"],
+            )
+        )
+
+
 # --- arrange-run orchestration ---------------------------------------------------
 
 def _plan_overview(plan: JobPlan) -> str:
@@ -296,6 +320,10 @@ def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
         return 0
 
     try:
+        if args.describe_all_styles:
+            _print_all_style_descriptions(as_json=args.json)
+            return 0
+
         if args.describe_style is not None:
             _print_style_description(args.describe_style, as_json=args.json)
             return 0
@@ -380,9 +408,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print a compact summary for one arrangement style preset and exit.",
     )
     arrange_run.add_argument(
+        "--describe-all-styles",
+        action="store_true",
+        help="Print compact summaries for every arrangement style preset and exit.",
+    )
+    arrange_run.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON for --list-styles or --describe-style output.",
+        help=(
+            "Emit machine-readable JSON for --list-styles, --describe-style, "
+            "or --describe-all-styles output."
+        ),
     )
     arrange_run.add_argument(
         "--name",
