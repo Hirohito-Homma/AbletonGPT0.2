@@ -12,6 +12,7 @@ this closes the loop: a user can go from nothing to a runnable job plan without 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from ..arrange.models import ArrangementPlan
@@ -75,14 +76,50 @@ def _cmd_create_simple(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
+    as_json = args.json
     try:
         document = read_json_document(args.arrangement)
         plan = arrangement_from_dict(document)
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        print("invalid arrangement: %s" % exc, file=sys.stderr)
+        # The document could not even be read/reconstructed -- there is no plan to
+        # summarize, so name/counts are null and the exception is the sole error.
+        if as_json:
+            print(
+                json.dumps(
+                    {
+                        "valid": False,
+                        "name": None,
+                        "section_count": None,
+                        "total_bars": None,
+                        "errors": [str(exc)],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print("invalid arrangement: %s" % exc, file=sys.stderr)
         return 1
 
     errors = _validation_errors(plan)
+    if as_json:
+        # Machine-readable result on stdout; errors travel inside the payload rather than
+        # on stderr, but the exit code still signals validity (0 ok, 1 invalid).
+        print(
+            json.dumps(
+                {
+                    "valid": not errors,
+                    "name": plan.name,
+                    "section_count": len(plan.sections),
+                    "total_bars": plan.total_bars,
+                    "errors": errors,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 1 if errors else 0
+
     if errors:
         for error in errors:
             print("invalid arrangement: %s" % error, file=sys.stderr)
@@ -123,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument(
         "--arrangement", required=True, help="Path to an arrangement plan JSON file."
+    )
+    validate.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a machine-readable JSON result (valid flag, counts, errors) on stdout.",
     )
     validate.set_defaults(func=_cmd_validate)
 

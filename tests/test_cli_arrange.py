@@ -129,6 +129,68 @@ def test_validate_rejects_non_positive_length_bars(tmp_path: Path, capsys):
     assert "length_bars must be positive" in capsys.readouterr().err
 
 
+# --- validate --json -------------------------------------------------------------
+
+def test_validate_json_reports_valid_arrangement(tmp_path: Path, capsys):
+    arr = tmp_path / "arr.json"
+    main(["create-simple", "--name", "ok", "--out", str(arr)])
+    capsys.readouterr()  # drop the create-simple output so stdout is JSON only
+
+    rc = main(["validate", "--arrangement", str(arr), "--json"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""  # machine-readable result goes to stdout only
+    payload = json.loads(captured.out)
+    assert payload["valid"] is True
+    assert payload["errors"] == []
+    assert payload["name"] == "ok"
+    assert payload["section_count"] == 5
+    assert isinstance(payload["total_bars"], int)
+
+
+def test_validate_json_reports_errors_for_invalid_arrangement(tmp_path: Path, capsys):
+    arr = _write(
+        tmp_path / "dup.json",
+        {
+            "name": "dup",
+            "sections": [
+                {"section_id": "x", "name": "A", "source_scene": "a", "start_bar": 1, "length_bars": 8},
+                {"section_id": "x", "name": "B", "source_scene": "b", "start_bar": 9, "length_bars": 8},
+            ],
+        },
+    )
+
+    rc = main(["validate", "--arrangement", str(arr), "--json"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    # Errors are carried inside the JSON payload, not printed to stderr.
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["valid"] is False
+    assert payload["name"] == "dup"
+    assert payload["section_count"] == 2
+    assert any("duplicate section_id" in err for err in payload["errors"])
+
+
+def test_validate_json_reports_unreadable_document(tmp_path: Path, capsys):
+    missing = tmp_path / "nope.json"
+
+    rc = main(["validate", "--arrangement", str(missing), "--json"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["valid"] is False
+    # No plan could be built, so the summary fields are null and the error is present.
+    assert payload["name"] is None
+    assert payload["section_count"] is None
+    assert payload["total_bars"] is None
+    assert payload["errors"]
+
+
 # --- parent directories & parser -------------------------------------------------
 
 def test_create_simple_makes_missing_parent_directories(tmp_path: Path):
