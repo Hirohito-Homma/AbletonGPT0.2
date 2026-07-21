@@ -16,32 +16,68 @@ from .models import ArrangementPlan, ArrangementSection
 #: Name used when a caller does not supply one (e.g. ``arrange-run`` with no ``--name``).
 DEFAULT_ARRANGEMENT_NAME = "dark_tech_house"
 
-# (section_id, name, source_scene, start_bar, length_bars, transition)
-_SIMPLE_SECTIONS: tuple[tuple[str, str, str, int, int, str], ...] = (
-    ("intro", "Intro", "intro", 1, 8, "none"),
-    ("groove", "Groove", "groove", 9, 16, "fill"),
-    ("break", "Break", "break", 25, 8, "break"),
-    ("drop", "Drop", "drop", 33, 16, "fill"),
-    ("outro", "Outro", "outro", 49, 8, "none"),
+# (section_id, name, source_scene, relative_length_bars, transition)
+# Start bars are derived (contiguous, 1-based) rather than stored, so the layout can be
+# rescaled to any total length while staying gap-free. The default lengths sum to 56.
+_SIMPLE_SECTIONS: tuple[tuple[str, str, str, int, str], ...] = (
+    ("intro", "Intro", "intro", 8, "none"),
+    ("groove", "Groove", "groove", 16, "fill"),
+    ("break", "Break", "break", 8, "break"),
+    ("drop", "Drop", "drop", 16, "fill"),
+    ("outro", "Outro", "outro", 8, "none"),
 )
 
 
-def simple_arrangement(name: str = DEFAULT_ARRANGEMENT_NAME) -> ArrangementPlan:
+def _scaled_lengths(total_bars: int) -> list[int]:
+    """Scale the default section lengths so they sum to exactly ``total_bars``.
+
+    Every section keeps its relative weight (rounded, at least 1 bar); the final section
+    absorbs the rounding remainder so the total lands on ``total_bars`` precisely.
+    """
+    base = [length for _, _, _, length, _ in _SIMPLE_SECTIONS]
+    base_total = sum(base)
+    scaled = [max(1, round(length * total_bars / base_total)) for length in base[:-1]]
+    scaled.append(max(1, total_bars - sum(scaled)))
+    return scaled
+
+
+def simple_arrangement(
+    name: str = DEFAULT_ARRANGEMENT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
     """Return the default dark-tech-house arrangement under ``name``.
 
     A valid, ready-to-use plan rather than a set of placeholders to fill in.
+    ``tempo`` (BPM) is carried onto the plan so ``build_job_plan`` emits a leading
+    ``set_tempo`` step. ``total_bars`` rescales the whole arrangement to that length; the
+    default (``None``) keeps the built-in 56-bar layout. Section start bars are always
+    recomputed contiguously from bar 1, so the result is gap-free at any length.
     """
-    sections = tuple(
-        ArrangementSection(
-            section_id=section_id,
-            name=display_name,
-            source_scene=source_scene,
-            start_bar=start_bar,
-            length_bars=length_bars,
-            transition=transition,
-        )
-        for section_id, display_name, source_scene, start_bar, length_bars, transition in (
-            _SIMPLE_SECTIONS
-        )
+    if total_bars is not None and total_bars <= 0:
+        raise ValueError("total_bars must be positive (got %d)" % total_bars)
+
+    lengths = (
+        _scaled_lengths(total_bars)
+        if total_bars is not None
+        else [length for _, _, _, length, _ in _SIMPLE_SECTIONS]
     )
-    return ArrangementPlan(name=name, sections=sections)
+
+    sections: list[ArrangementSection] = []
+    start_bar = 1
+    for (section_id, display_name, source_scene, _base_length, transition), length in zip(
+        _SIMPLE_SECTIONS, lengths
+    ):
+        sections.append(
+            ArrangementSection(
+                section_id=section_id,
+                name=display_name,
+                source_scene=source_scene,
+                start_bar=start_bar,
+                length_bars=length,
+                transition=transition,
+            )
+        )
+        start_bar += length
+    return ArrangementPlan(name=name, sections=tuple(sections), tempo=tempo)

@@ -34,15 +34,21 @@ def arrangement_from_dict(document: dict[str, Any]) -> ArrangementPlan:
         )
         for raw in document.get("sections", [])
     )
-    return ArrangementPlan(name=document["name"], sections=sections)
+    tempo = document.get("tempo")
+    return ArrangementPlan(
+        name=document["name"],
+        sections=sections,
+        tempo=None if tempo is None else float(tempo),
+    )
 
 
 def arrangement_to_dict(plan: ArrangementPlan) -> dict[str, Any]:
     """Serialize an :class:`ArrangementPlan` to a JSON-ready dict.
 
-    Round-trips with :func:`arrangement_from_dict`.
+    Round-trips with :func:`arrangement_from_dict`. ``tempo`` is emitted only when set,
+    so tempo-less arrangements serialize exactly as before.
     """
-    return {
+    document: dict[str, Any] = {
         "name": plan.name,
         "sections": [
             {
@@ -57,6 +63,9 @@ def arrangement_to_dict(plan: ArrangementPlan) -> dict[str, Any]:
             for section in plan.sections
         ],
     }
+    if plan.tempo is not None:
+        document["tempo"] = plan.tempo
+    return document
 
 
 def read_json_document(path: str | Path) -> Any:

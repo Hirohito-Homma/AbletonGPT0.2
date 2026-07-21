@@ -130,15 +130,45 @@ def _cmd_status(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
 
 # --- arrange-run orchestration ---------------------------------------------------
 
+def _plan_overview(plan: JobPlan) -> str:
+    """Human-readable one-liner describing a job plan (name, steps, tempo, length).
+
+    Tempo and total length are read back out of the steps so this works for both freshly
+    generated plans and ones reloaded from disk on ``--resume``.
+    """
+    parts = ["job plan '%s' with %d step(s)" % (plan.name, len(plan.steps))]
+    tempo = next(
+        (step.params.get("bpm") for step in plan.steps if step.command == "set_tempo"),
+        None,
+    )
+    if tempo is not None:
+        parts.append("tempo=%g" % float(tempo))
+    total_bars = sum(
+        int(step.params.get("length_bars", 0))
+        for step in plan.steps
+        if step.command == "place_scene"
+    )
+    if total_bars:
+        parts.append("%d bar(s)" % total_bars)
+    return ", ".join(parts)
+
+
 def _prepare_job_plan(
-    *, name: str, job_path: str | None, resume: bool
+    *,
+    name: str,
+    job_path: str | None,
+    resume: bool,
+    tempo: float | None,
+    bars: int | None,
 ) -> tuple[JobPlan, dict[str, StepStatus], tuple[str, ...]]:
     """Return ``(plan, prior_statuses, completed_ids)`` for an arrange-run.
 
     Resume path: when ``--resume`` is set and ``job_path`` already holds a saved plan,
-    reload it plus its progress so completed steps are skipped. Otherwise build a fresh
-    default arrangement -> job plan, with empty prior progress. Falling back to a fresh
-    build (rather than erroring) keeps ``--resume`` safe to pass on a first run.
+    reload it plus its progress so completed steps are skipped -- the on-disk plan wins,
+    so ``--tempo``/``--bars``/``--name`` are deliberately ignored and never regenerate it.
+    Otherwise build a fresh arrangement (honoring ``name``/``tempo``/``bars``) -> job plan,
+    with empty prior progress. Falling back to a fresh build (rather than erroring) keeps
+    ``--resume`` safe to pass on a first run.
     """
     if resume and job_path and Path(job_path).exists():
         plan = load_job_plan(job_path)
@@ -147,8 +177,8 @@ def _prepare_job_plan(
             sid for sid, status in prior.items() if status in _COMPLETED
         )
         return plan, prior, completed
-    plan = build_job_plan(simple_arrangement(name))
-    return plan, {}, ()
+    arrangement = simple_arrangement(name, tempo=tempo, total_bars=bars)
+    return build_job_plan(arrangement), {}, ()
 
 
 def run_arrangement(
@@ -159,23 +189,24 @@ def run_arrangement(
     save: bool = True,
     dry_run: bool = False,
     resume: bool = False,
+    tempo: float | None = None,
+    bars: int | None = None,
 ) -> int:
-    """Build (or reload) a default arrangement's job plan and run it end-to-end.
+    """Build (or reload) an arrangement's job plan and run it end-to-end.
 
     One-shot glue over the existing engines: ``simple_arrangement`` -> ``build_job_plan``
-    -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``dry_run``
-    prints the plan summary and returns without touching the executor or disk. Returns a
-    process exit code (0 ok, 1 if any step failed).
+    -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``tempo`` (BPM)
+    and ``bars`` (total length) shape the generated arrangement; both are ignored on the
+    ``resume`` path, where the saved plan takes precedence. ``dry_run`` prints the plan
+    summary and returns without touching the executor or disk. Returns a process exit code
+    (0 ok, 1 if any step failed).
     """
     plan, prior, completed = _prepare_job_plan(
-        name=name, job_path=job_path, resume=resume
+        name=name, job_path=job_path, resume=resume, tempo=tempo, bars=bars
     )
 
     if dry_run:
-        print(
-            "dry-run: would run job plan '%s' with %d step(s) (no execution)"
-            % (plan.name, len(plan.steps))
-        )
+        print("dry-run: would run %s (no execution)" % _plan_overview(plan))
         return 0
 
     persist = save and job_path is not None
@@ -203,6 +234,8 @@ def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
         save=save,
         dry_run=args.dry_run,
         resume=args.resume,
+        tempo=args.tempo,
+        bars=args.bars,
     )
 
 
@@ -250,6 +283,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--name",
         default=DEFAULT_ARRANGEMENT_NAME,
         help="Name for the generated arrangement (default: %(default)s).",
+    )
+    arrange_run.add_argument(
+        "--tempo",
+        type=float,
+        default=None,
+        metavar="BPM",
+        help="Song tempo in BPM; adds a leading set_tempo step (ignored with --resume).",
+    )
+    arrange_run.add_argument(
+        "--bars",
+        type=int,
+        default=None,
+        help="Total arrangement length in bars (ignored with --resume).",
     )
     arrange_run.add_argument(
         "--job-path",
