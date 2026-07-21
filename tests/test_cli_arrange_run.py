@@ -71,6 +71,97 @@ def test_dry_run_builds_plan_without_executing_or_saving(tmp_path: Path, capsys)
     assert "%d step" % len(_DEFAULT_STEP_IDS) in printed
 
 
+# --- dry-run JSON ----------------------------------------------------------------
+
+def test_dry_run_json_prints_parseable_json_without_executing_or_saving(
+    tmp_path: Path, capsys
+):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--job-path", str(out), "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    # A dry run: the executor is never touched and nothing is written to disk.
+    assert executor.executed == []
+    assert not out.exists()
+    # stdout is JSON and nothing else.
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+    # Defaults to the dark-tech-house preset.
+    assert payload["style"] == "dark-tech-house"
+    assert payload["name"] == "dark_tech_house"
+    # section_count is present and matches the serialized sections.
+    assert payload["section_count"] == len(payload["sections"])
+    assert payload["step_count"] == len(payload["steps"]) == len(_DEFAULT_STEP_IDS)
+
+
+def test_dry_run_json_section_count_matches_style(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # deep-house ships a fixed 7-section layout at 122 BPM over 64 bars.
+    expected = arrangement_for_style("deep-house", None)
+    assert payload["style"] == "deep-house"
+    assert payload["section_count"] == len(expected.sections) == 7
+    assert payload["tempo"] == 122.0
+    assert payload["total_bars"] == 64
+    assert sum(s["length_bars"] for s in payload["sections"]) == 64
+
+
+def test_dry_run_json_reflects_tempo_bars_name_overrides(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "deep-house",
+            "--tempo",
+            "124",
+            "--bars",
+            "80",
+            "--name",
+            "json_set",
+            "--dry-run-json",
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # Explicit overrides win over deep-house's 122/64 defaults.
+    assert payload["name"] == "json_set"
+    assert payload["tempo"] == 124.0
+    assert payload["total_bars"] == 80
+
+
+def test_dry_run_json_unknown_style_fails_clearly(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "unknown", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 2
+    assert executor.executed == []
+    captured = capsys.readouterr()
+    assert captured.out == ""  # no partial JSON on the error path
+    assert "arrange-run: unsupported style: 'unknown'" in captured.err
+
+
 # --- execution -------------------------------------------------------------------
 
 def test_arrange_run_executes_generated_plan(tmp_path: Path, capsys):
