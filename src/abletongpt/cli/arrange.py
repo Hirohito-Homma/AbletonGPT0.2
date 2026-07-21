@@ -27,12 +27,13 @@ from .serialization import (
 
 # --- validation ------------------------------------------------------------------
 
-def _validation_errors(plan: ArrangementPlan) -> list[str]:
+def _validation_errors(plan: ArrangementPlan, *, strict: bool = False) -> list[str]:
     """Return human-readable problems with ``plan`` (empty list = valid).
 
-    Flags empty arrangements, duplicate section ids, non-positive bars, and sections
-    whose bar ranges overlap. Gaps between sections are deliberately *not* flagged --
-    silence between sections is legitimate -- only overlaps, which are unambiguous errors.
+    Always flags empty arrangements, duplicate section ids, non-positive bars, and
+    sections whose bar ranges overlap. Gaps between sections are legitimate (silence),
+    so by default they are *not* flagged. ``strict`` additionally requires a fully
+    contiguous arrangement starting at bar 1, reporting any gap or leading offset.
     """
     errors: list[str] = []
     if not plan.sections:
@@ -55,6 +56,45 @@ def _validation_errors(plan: ArrangementPlan) -> list[str]:
             )
 
     errors.extend(_overlap_errors(plan))
+    if strict:
+        errors.extend(_gap_errors(plan))
+    return errors
+
+
+def _gap_errors(plan: ArrangementPlan) -> list[str]:
+    """Report gaps that break a strictly contiguous, bar-1-anchored arrangement.
+
+    Only for ``--strict``: flags a leading gap (the earliest section not starting at
+    bar 1) and any unused bars between one section's exclusive end and the next section's
+    start. Only well-formed sections (positive start and length) take part; overlaps are
+    handled separately by :func:`_overlap_errors`.
+    """
+    errors: list[str] = []
+    placed = sorted(
+        (s for s in plan.sections if s.start_bar > 0 and s.length_bars > 0),
+        key=lambda s: s.start_bar,
+    )
+    if not placed:
+        return errors
+
+    if placed[0].start_bar != 1:
+        errors.append(
+            "section %r: arrangement should start at bar 1 (starts at bar %d)"
+            % (placed[0].section_id, placed[0].start_bar)
+        )
+
+    furthest_end = placed[0].start_bar + placed[0].length_bars
+    prev_id = placed[0].section_id
+    for section in placed[1:]:
+        if section.start_bar > furthest_end:
+            errors.append(
+                "gap between section %r and %r (bars %d-%d unused)"
+                % (prev_id, section.section_id, furthest_end, section.start_bar - 1)
+            )
+        end = section.start_bar + section.length_bars
+        if end > furthest_end:
+            furthest_end = end
+            prev_id = section.section_id
     return errors
 
 
@@ -143,7 +183,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             print("invalid arrangement: %s" % exc, file=sys.stderr)
         return 1
 
-    errors = _validation_errors(plan)
+    errors = _validation_errors(plan, strict=args.strict)
     if as_json:
         # Machine-readable result on stdout; errors travel inside the payload rather than
         # on stderr, but the exit code still signals validity (0 ok, 1 invalid).
@@ -207,6 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit a machine-readable JSON result (valid flag, counts, errors) on stdout.",
+    )
+    validate.add_argument(
+        "--strict",
+        action="store_true",
+        help="Also require a contiguous arrangement starting at bar 1 (flag gaps).",
     )
     validate.set_defaults(func=_cmd_validate)
 
