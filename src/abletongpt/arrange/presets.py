@@ -70,6 +70,24 @@ MINIMAL_TECHNO_DEFAULT_NAME = "minimal_techno"
 MINIMAL_TECHNO_DEFAULT_TEMPO = 126.0
 MINIMAL_TECHNO_DEFAULT_BARS = 64
 
+#: dub-techno layout: deep and spacey -- echoing chords, a sub-heavy groove, and delay
+#: swells around a dubbed-out break. More floating than minimal-techno, harder than
+#: deep-house. Relative lengths sum to 64.
+_DUB_TECHNO_SECTIONS: tuple[_SectionSpec, ...] = (
+    ("intro", "Intro", "intro", 8, "none"),
+    ("chord_echo", "Chord Echo", "chord_echo", 8, "none"),
+    ("sub_groove", "Sub Groove", "sub_groove", 8, "fill"),
+    ("delay_rise", "Delay Rise", "delay_rise", 16, "fill"),
+    ("dub_break", "Dub Break", "dub_break", 8, "break"),
+    ("main_echo", "Main Echo", "main_echo", 8, "fill"),
+    ("outro", "Outro", "outro", 8, "none"),
+)
+
+#: dub-techno defaults, applied when the caller leaves tempo/length unset.
+DUB_TECHNO_DEFAULT_NAME = "dub_techno"
+DUB_TECHNO_DEFAULT_TEMPO = 124.0
+DUB_TECHNO_DEFAULT_BARS = 64
+
 
 def _scaled_lengths(base_lengths: list[int], total_bars: int) -> list[int]:
     """Scale ``base_lengths`` so they sum to exactly ``total_bars``.
@@ -184,6 +202,27 @@ def minimal_techno_arrangement(
     )
 
 
+def dub_techno_arrangement(
+    name: str = DUB_TECHNO_DEFAULT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
+    """Return the dub-techno arrangement under ``name``.
+
+    Deep and spacey: echoing chords and delay swells over a sub-heavy groove -- more
+    floating than minimal-techno, harder than deep-house. Ships opinionated defaults:
+    124 BPM and a 64-bar layout. An explicit ``tempo``/``total_bars`` (e.g. from
+    ``--tempo``/``--bars``) overrides them; leaving them unset applies the defaults.
+    """
+    return _arrangement_from_spec(
+        name,
+        _DUB_TECHNO_SECTIONS,
+        tempo=DUB_TECHNO_DEFAULT_TEMPO if tempo is None else tempo,
+        total_bars=DUB_TECHNO_DEFAULT_BARS if total_bars is None else total_bars,
+    )
+
+
 # --- style registry --------------------------------------------------------------
 
 #: Builder signature shared by every style preset: ``(name, *, tempo, total_bars)``.
@@ -198,12 +237,13 @@ class UnknownStyleError(ValueError):
     """
 
 
-#: style name -> arrangement builder. New genres (``dub-techno``, ...) join by adding one
-#: entry here; nothing else needs to change.
+#: style name -> arrangement builder. New genres join by adding one entry here; nothing
+#: else needs to change.
 _STYLE_BUILDERS: dict[str, StyleBuilder] = {
     "dark-tech-house": simple_arrangement,
     "deep-house": deep_house_arrangement,
     "minimal-techno": minimal_techno_arrangement,
+    "dub-techno": dub_techno_arrangement,
 }
 
 

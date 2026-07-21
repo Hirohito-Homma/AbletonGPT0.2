@@ -11,6 +11,7 @@ from .presets import (
     available_styles,
     deep_house_arrangement,
     default_name_for_style,
+    dub_techno_arrangement,
     minimal_techno_arrangement,
     simple_arrangement,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "available_styles",
     "deep_house_arrangement",
     "default_name_for_style",
+    "dub_techno_arrangement",
     "minimal_techno_arrangement",
     "simple_arrangement",
 ]
