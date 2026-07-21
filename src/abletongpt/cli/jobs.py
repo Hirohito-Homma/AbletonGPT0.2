@@ -202,13 +202,16 @@ def _section_summaries(
 ) -> list[dict[str, object]]:
     """Machine-friendly per-section dicts for an arrangement (shared JSON shape).
 
-    ``tempo`` is the arrangement-wide BPM (a single set_tempo governs the whole plan);
-    each section's ``duration_seconds`` / ``duration_formatted`` is that section's own
-    ``length_bars`` at ``tempo``, mirroring the top-level duration fields and staying
-    ``null`` when the tempo is unknown.
+    ``tempo`` is the arrangement-wide BPM (a single set_tempo governs the whole plan).
+    Each section's ``duration_seconds`` / ``duration_formatted`` is its own ``length_bars``
+    at ``tempo``, and ``start_seconds`` / ``start_formatted`` is its wall-clock offset from
+    the top of the arrangement (the bars before it). Both pairs mirror the top-level
+    duration fields and stay ``null`` when the tempo is unknown.
     """
     summaries: list[dict[str, object]] = []
     for section in arrangement.sections:
+        # start_bar is 1-based, so the elapsed bars before this section is start_bar - 1.
+        start = _duration_seconds(tempo, section.start_bar - 1)
         duration = _duration_seconds(tempo, section.length_bars)
         summaries.append(
             {
@@ -218,6 +221,8 @@ def _section_summaries(
                 "start_bar": section.start_bar,
                 "length_bars": section.length_bars,
                 "end_bar": section.start_bar + section.length_bars,
+                "start_seconds": start,
+                "start_formatted": _duration_label(start),
                 "duration_seconds": duration,
                 "duration_formatted": _duration_label(duration),
                 "transition": section.transition,
