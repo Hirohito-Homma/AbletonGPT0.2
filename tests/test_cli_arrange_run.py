@@ -1197,12 +1197,70 @@ def test_arrange_run_describe_style_json_includes_sections(capsys):
         "start_bar",
         "length_bars",
         "end_bar",
+        "duration_seconds",
+        "duration_formatted",
         "transition",
         "tags",
     }
     assert sum(section["length_bars"] for section in sections) == payload["total_bars"]
     for section in sections:
         assert section["end_bar"] == section["start_bar"] + section["length_bars"]
+
+
+def test_describe_style_json_sections_carry_duration(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "deep-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    # Each section's duration is its own bars at the arrangement tempo (122 BPM).
+    for section in sections:
+        assert section["duration_seconds"] == round(
+            section["length_bars"] * 4 * 60 / 122, 3
+        )
+    # A 16-bar section formats to twice an 8-bar one.
+    eight_bar = next(s for s in sections if s["length_bars"] == 8)
+    assert eight_bar["duration_formatted"] == "0:16"
+
+
+def test_dry_run_json_sections_carry_duration(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    assert all("duration_seconds" in s and "duration_formatted" in s for s in sections)
+    assert sections[0]["duration_seconds"] == round(
+        sections[0]["length_bars"] * 4 * 60 / 122, 3
+    )
+
+
+def test_describe_style_json_section_duration_null_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    # dark-tech-house has no tempo, so every section's duration is null too.
+    rc = main(
+        ["arrange-run", "--describe-style", "dark-tech-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    sections = json.loads(capsys.readouterr().out)["sections"]
+    assert sections
+    for section in sections:
+        assert section["duration_seconds"] is None
+        assert section["duration_formatted"] is None
 
 
 def test_arrange_run_describe_all_styles_json_includes_sections(capsys):

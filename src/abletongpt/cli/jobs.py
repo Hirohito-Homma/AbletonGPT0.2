@@ -197,30 +197,43 @@ def _duration_label(seconds: float | None) -> str | None:
     return "%d:%02d" % (minutes, secs)
 
 
-def _section_summaries(arrangement) -> list[dict[str, object]]:
-    """Machine-friendly per-section dicts for an arrangement (shared JSON shape)."""
-    return [
-        {
-            "section_id": section.section_id,
-            "name": section.name,
-            "source_scene": section.source_scene,
-            "start_bar": section.start_bar,
-            "length_bars": section.length_bars,
-            "end_bar": section.start_bar + section.length_bars,
-            "transition": section.transition,
-            "tags": list(section.tags),
-        }
-        for section in arrangement.sections
-    ]
+def _section_summaries(
+    arrangement, tempo: float | None
+) -> list[dict[str, object]]:
+    """Machine-friendly per-section dicts for an arrangement (shared JSON shape).
+
+    ``tempo`` is the arrangement-wide BPM (a single set_tempo governs the whole plan);
+    each section's ``duration_seconds`` / ``duration_formatted`` is that section's own
+    ``length_bars`` at ``tempo``, mirroring the top-level duration fields and staying
+    ``null`` when the tempo is unknown.
+    """
+    summaries: list[dict[str, object]] = []
+    for section in arrangement.sections:
+        duration = _duration_seconds(tempo, section.length_bars)
+        summaries.append(
+            {
+                "section_id": section.section_id,
+                "name": section.name,
+                "source_scene": section.source_scene,
+                "start_bar": section.start_bar,
+                "length_bars": section.length_bars,
+                "end_bar": section.start_bar + section.length_bars,
+                "duration_seconds": duration,
+                "duration_formatted": _duration_label(duration),
+                "transition": section.transition,
+                "tags": list(section.tags),
+            }
+        )
+    return summaries
 
 
 def _style_description(style: str) -> dict[str, object]:
     """Return a compact, machine-friendly summary for one registered style."""
     arrangement = arrangement_for_style(style, None)
     plan = build_job_plan(arrangement)
-    sections = _section_summaries(arrangement)
     tempo = _tempo_of(plan)
     total_bars = _total_bars_of(plan)
+    sections = _section_summaries(arrangement, tempo)
     duration = _duration_seconds(tempo, total_bars)
     return {
         "style": style,
@@ -330,9 +343,9 @@ def _dry_run_description(
     """
     arrangement = arrangement_for_style(style, name, tempo=tempo, total_bars=bars)
     plan = build_job_plan(arrangement)
-    sections = _section_summaries(arrangement)
     plan_tempo = _tempo_of(plan)
     total_bars = _total_bars_of(plan)
+    sections = _section_summaries(arrangement, plan_tempo)
     duration = _duration_seconds(plan_tempo, total_bars)
     return {
         "dry_run": True,
