@@ -163,6 +163,23 @@ def _total_bars_of(plan: JobPlan) -> int:
     )
 
 
+#: Beats per bar assumed when turning a bar count into wall-clock time. Every arrange-run
+#: style preset is 4/4, so this is fixed rather than read from the (currently
+#: time-signature-less) arrangement model.
+_BEATS_PER_BAR = 4
+
+
+def _duration_seconds(tempo: float | None, total_bars: int) -> float | None:
+    """Wall-clock length of ``total_bars`` at ``tempo`` BPM (4/4), or ``None``.
+
+    Returns ``None`` when the tempo is unknown (no leading set_tempo step) or non-positive,
+    since duration is undefined without a positive tempo. Rounded to milliseconds.
+    """
+    if tempo is None or tempo <= 0:
+        return None
+    return round(total_bars * _BEATS_PER_BAR * 60.0 / tempo, 3)
+
+
 def _section_summaries(arrangement) -> list[dict[str, object]]:
     """Machine-friendly per-section dicts for an arrangement (shared JSON shape)."""
     return [
@@ -292,14 +309,17 @@ def _dry_run_description(
     arrangement = arrangement_for_style(style, name, tempo=tempo, total_bars=bars)
     plan = build_job_plan(arrangement)
     sections = _section_summaries(arrangement)
+    plan_tempo = _tempo_of(plan)
+    total_bars = _total_bars_of(plan)
     return {
         "dry_run": True,
         "style": style,
         "name": plan.name,
         "step_count": len(plan.steps),
         "section_count": len(sections),
-        "tempo": _tempo_of(plan),
-        "total_bars": _total_bars_of(plan),
+        "tempo": plan_tempo,
+        "total_bars": total_bars,
+        "duration_seconds": _duration_seconds(plan_tempo, total_bars),
         "sections": sections,
         "steps": _step_summaries(plan),
     }
