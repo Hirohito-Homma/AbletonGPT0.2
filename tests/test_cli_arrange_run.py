@@ -7,6 +7,7 @@ here injects a fake executor, so nothing ever touches Ableton or a socket.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from abletongpt.cli.jobs import main
@@ -846,3 +847,50 @@ def test_arrange_run_describe_style_unknown_style_fails_clearly(capsys):
     assert captured.out == ""
     assert "arrange-run: unsupported style: 'unknown'" in captured.err
     assert "dark-tech-house" in captured.err
+
+def test_arrange_run_describe_style_json_prints_machine_readable_summary(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "dub-techno", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "style": "dub-techno",
+        "name": "dub_techno",
+        "step_count": 8,
+        "tempo": 124.0,
+        "total_bars": 64,
+    }
+
+
+def test_arrange_run_describe_style_json_does_not_save_or_execute(
+    tmp_path: Path, capsys
+):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--describe-style",
+            "minimal-techno",
+            "--json",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert not out.exists()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["style"] == "minimal-techno"
+    assert payload["name"] == "minimal_techno"
+    assert payload["tempo"] == 126.0
+    assert payload["total_bars"] == 64

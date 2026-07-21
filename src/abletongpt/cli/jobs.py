@@ -18,6 +18,7 @@ the default is :class:`~abletongpt.jobs.AbletonStepExecutor`.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Callable
@@ -140,12 +141,44 @@ def _print_available_styles() -> None:
         print(style)
 
 
-def _print_style_description(style: str) -> None:
-    """Print a compact summary for one registered arrange-run style."""
+def _style_description(style: str) -> dict[str, object]:
+    """Return a compact, machine-friendly summary for one registered style."""
     arrangement = arrangement_for_style(style, None)
     plan = build_job_plan(arrangement)
-    print("style: %s" % style)
-    print(_plan_overview(plan))
+    tempo = next(
+        (step.params.get("bpm") for step in plan.steps if step.command == "set_tempo"),
+        None,
+    )
+    total_bars = sum(
+        int(step.params.get("length_bars", 0))
+        for step in plan.steps
+        if step.command == "place_scene"
+    )
+    return {
+        "style": style,
+        "name": plan.name,
+        "step_count": len(plan.steps),
+        "tempo": float(tempo) if tempo is not None else None,
+        "total_bars": total_bars,
+    }
+
+
+def _print_style_description(style: str, *, as_json: bool = False) -> None:
+    """Print a compact summary for one registered arrange-run style."""
+    description = _style_description(style)
+    if as_json:
+        print(json.dumps(description, indent=2, sort_keys=True))
+        return
+    print("style: %s" % description["style"])
+    print(
+        "job plan '%s' with %d step(s), tempo=%g, %d bar(s)"
+        % (
+            description["name"],
+            description["step_count"],
+            description["tempo"],
+            description["total_bars"],
+        )
+    )
 
 
 # --- arrange-run orchestration ---------------------------------------------------
@@ -260,7 +293,7 @@ def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
 
     try:
         if args.describe_style is not None:
-            _print_style_description(args.describe_style)
+            _print_style_description(args.describe_style, as_json=args.json)
             return 0
 
         # Save only when a destination exists and the user did not opt out; there is nothing
@@ -341,6 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="STYLE",
         default=None,
         help="Print a compact summary for one arrangement style preset and exit.",
+    )
+    arrange_run.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON for --describe-style output.",
     )
     arrange_run.add_argument(
         "--name",
