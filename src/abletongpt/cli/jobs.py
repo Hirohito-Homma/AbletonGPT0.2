@@ -1,9 +1,13 @@
 """Command-line entry points for creating, running, and resuming job plans.
 
-    python -m abletongpt.cli.jobs create --arrangement a.json --out plan.json
-    python -m abletongpt.cli.jobs run     --plan plan.json
-    python -m abletongpt.cli.jobs resume  --plan plan.json
-    python -m abletongpt.cli.jobs status  --plan plan.json
+    python -m abletongpt.cli.jobs create      --arrangement a.json --out plan.json
+    python -m abletongpt.cli.jobs run         --plan plan.json
+    python -m abletongpt.cli.jobs resume      --plan plan.json
+    python -m abletongpt.cli.jobs status      --plan plan.json
+    python -m abletongpt.cli.jobs arrange-run --job-path plan.json
+
+``arrange-run`` is the one-shot path: it generates the default arrangement, builds a
+job plan, optionally saves it, and runs it -- all in a single command.
 
 The CLI is a thin wrapper over the existing pure engines and stores: it never talks
 to Ableton itself, it hands each :class:`JobStep` to an executor. The executor is
@@ -14,9 +18,11 @@ the default is :class:`~abletongpt.jobs.AbletonStepExecutor`.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import Callable
 
 from .serialization import arrangement_from_dict, read_json_document
+from ..arrange.presets import DEFAULT_ARRANGEMENT_NAME, simple_arrangement
 from ..jobs import (
     AbletonStepExecutor,
     JobPlan,
@@ -122,6 +128,84 @@ def _cmd_status(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
     return 0
 
 
+# --- arrange-run orchestration ---------------------------------------------------
+
+def _prepare_job_plan(
+    *, name: str, job_path: str | None, resume: bool
+) -> tuple[JobPlan, dict[str, StepStatus], tuple[str, ...]]:
+    """Return ``(plan, prior_statuses, completed_ids)`` for an arrange-run.
+
+    Resume path: when ``--resume`` is set and ``job_path`` already holds a saved plan,
+    reload it plus its progress so completed steps are skipped. Otherwise build a fresh
+    default arrangement -> job plan, with empty prior progress. Falling back to a fresh
+    build (rather than erroring) keeps ``--resume`` safe to pass on a first run.
+    """
+    if resume and job_path and Path(job_path).exists():
+        plan = load_job_plan(job_path)
+        prior = load_step_statuses(job_path)
+        completed = tuple(
+            sid for sid, status in prior.items() if status in _COMPLETED
+        )
+        return plan, prior, completed
+    plan = build_job_plan(simple_arrangement(name))
+    return plan, {}, ()
+
+
+def run_arrangement(
+    factory: ExecutorFactory,
+    *,
+    name: str = DEFAULT_ARRANGEMENT_NAME,
+    job_path: str | None = None,
+    save: bool = True,
+    dry_run: bool = False,
+    resume: bool = False,
+) -> int:
+    """Build (or reload) a default arrangement's job plan and run it end-to-end.
+
+    One-shot glue over the existing engines: ``simple_arrangement`` -> ``build_job_plan``
+    -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``dry_run``
+    prints the plan summary and returns without touching the executor or disk. Returns a
+    process exit code (0 ok, 1 if any step failed).
+    """
+    plan, prior, completed = _prepare_job_plan(
+        name=name, job_path=job_path, resume=resume
+    )
+
+    if dry_run:
+        print(
+            "dry-run: would run job plan '%s' with %d step(s) (no execution)"
+            % (plan.name, len(plan.steps))
+        )
+        return 0
+
+    persist = save and job_path is not None
+    if persist:
+        save_job_plan(plan, job_path, statuses=prior or None)  # persist before running
+
+    result = JobRunner(factory()).run(plan, completed_step_ids=completed)
+    final = _merge_statuses(prior, result)
+
+    if persist:
+        save_job_plan(plan, job_path, statuses=final)  # re-save with fresh progress
+
+    _, failed, _ = _print_counts(final)
+    return 1 if failed else 0
+
+
+def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
+    # Save only when a destination exists and the user did not opt out; there is nothing
+    # to persist without ``--job-path``.
+    save = args.job_path is not None and not args.no_save
+    return run_arrangement(
+        factory,
+        name=args.name,
+        job_path=args.job_path,
+        save=save,
+        dry_run=args.dry_run,
+        resume=args.resume,
+    )
+
+
 # --- argument parsing ------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -157,6 +241,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--plan", required=True, help="Path to a job plan JSON file.")
     status.set_defaults(func=_cmd_status)
+
+    arrange_run = sub.add_parser(
+        "arrange-run",
+        help="Generate a default arrangement, build a job plan, and run it end-to-end.",
+    )
+    arrange_run.add_argument(
+        "--name",
+        default=DEFAULT_ARRANGEMENT_NAME,
+        help="Name for the generated arrangement (default: %(default)s).",
+    )
+    arrange_run.add_argument(
+        "--job-path",
+        default=None,
+        help="Where to save the generated job plan (also read back with --resume).",
+    )
+    arrange_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the job plan that would run without executing or saving anything.",
+    )
+    arrange_run.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reload the plan at --job-path and run only its not-yet-completed steps.",
+    )
+    arrange_run.add_argument(
+        "--no-save",
+        action="store_true",
+        help="Run without saving the job plan, even when --job-path is given.",
+    )
+    arrange_run.set_defaults(func=_cmd_arrange_run)
 
     return parser
 

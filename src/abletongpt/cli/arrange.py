@@ -14,42 +14,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..arrange.models import ArrangementPlan, ArrangementSection
+from ..arrange.models import ArrangementPlan
+from ..arrange.presets import simple_arrangement
 from .serialization import (
     arrangement_from_dict,
     arrangement_to_dict,
     read_json_document,
     write_json_document,
 )
-
-# (section_id, name, source_scene, start_bar, length_bars, transition)
-# A compact, contiguous intro->outro layout. Bars are 1-based and positive so the
-# result passes ``validate`` as-is. section_id / source_scene use the same lowercase
-# vocabulary the Arrange Engine emits, so build_job_plan maps them cleanly.
-_SIMPLE_SECTIONS: tuple[tuple[str, str, str, int, int, str], ...] = (
-    ("intro", "Intro", "intro", 1, 8, "none"),
-    ("groove", "Groove", "groove", 9, 16, "fill"),
-    ("break", "Break", "break", 25, 8, "break"),
-    ("drop", "Drop", "drop", 33, 16, "fill"),
-    ("outro", "Outro", "outro", 49, 8, "none"),
-)
-
-
-def _simple_arrangement(name: str) -> ArrangementPlan:
-    sections = tuple(
-        ArrangementSection(
-            section_id=section_id,
-            name=display_name,
-            source_scene=source_scene,
-            start_bar=start_bar,
-            length_bars=length_bars,
-            transition=transition,
-        )
-        for section_id, display_name, source_scene, start_bar, length_bars, transition in (
-            _SIMPLE_SECTIONS
-        )
-    )
-    return ArrangementPlan(name=name, sections=sections)
 
 
 # --- validation ------------------------------------------------------------------
@@ -83,7 +55,7 @@ def _validation_errors(plan: ArrangementPlan) -> list[str]:
 def _cmd_template(args: argparse.Namespace) -> int:
     # The template is just the simple layout under the user's chosen name -- a valid,
     # ready-to-edit starting point rather than a set of placeholders to fill in.
-    plan = _simple_arrangement(args.name)
+    plan = simple_arrangement(args.name)
     out_path = write_json_document(arrangement_to_dict(plan), args.out)
     print(
         "wrote arrangement template '%s' with %d section(s) -> %s"
@@ -93,7 +65,7 @@ def _cmd_template(args: argparse.Namespace) -> int:
 
 
 def _cmd_create_simple(args: argparse.Namespace) -> int:
-    plan = _simple_arrangement(args.name)
+    plan = simple_arrangement(args.name)
     out_path = write_json_document(arrangement_to_dict(plan), args.out)
     print(
         "wrote arrangement '%s' with %d section(s) -> %s"
