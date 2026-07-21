@@ -9,6 +9,7 @@ from .presets import (
     UnknownStyleError,
     arrangement_for_style,
     available_styles,
+    deep_house_arrangement,
     simple_arrangement,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "UnknownStyleError",
     "arrangement_for_style",
     "available_styles",
+    "deep_house_arrangement",
     "simple_arrangement",
 ]

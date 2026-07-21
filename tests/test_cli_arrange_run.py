@@ -18,7 +18,12 @@ from abletongpt.jobs import (
     load_step_statuses,
     save_job_plan,
 )
-from abletongpt.arrange.presets import simple_arrangement
+from abletongpt.arrange.models import ArrangementPlan
+from abletongpt.arrange.presets import (
+    arrangement_for_style,
+    available_styles,
+    simple_arrangement,
+)
 
 
 class FakeExecutor:
@@ -381,3 +386,106 @@ def test_resume_ignores_style(tmp_path: Path):
 
     assert rc == 0
     assert load_job_plan(out).step_ids == seed.step_ids
+
+
+# --- deep-house style ------------------------------------------------------------
+
+def test_available_styles_includes_both_presets():
+    styles = available_styles()
+    assert "dark-tech-house" in styles
+    assert "deep-house" in styles
+
+
+def test_arrangement_for_style_deep_house_returns_plan():
+    plan = arrangement_for_style("deep-house", "late_night")
+
+    assert isinstance(plan, ArrangementPlan)
+    assert plan.name == "late_night"
+    section_ids = [section.section_id for section in plan.sections]
+    assert section_ids == [
+        "intro",
+        "groove_a",
+        "chord_intro",
+        "main_groove",
+        "breakdown",
+        "main_groove_2",
+        "outro",
+    ]
+    # deep-house ships opinionated defaults: 122 BPM over a 64-bar layout.
+    assert plan.tempo == 122.0
+    assert sum(section.length_bars for section in plan.sections) == 64
+
+
+def test_deep_house_default_dark_tech_house_unchanged():
+    # Adding deep-house must not perturb the dark-tech-house default in any way.
+    plan = simple_arrangement()
+    assert plan.tempo is None
+    assert [s.section_id for s in plan.sections] == [
+        "intro",
+        "groove",
+        "break",
+        "drop",
+        "outro",
+    ]
+    assert sum(s.length_bars for s in plan.sections) == 56
+
+
+def test_arrange_run_deep_house_dry_run_succeeds(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []  # dry-run never touches the executor
+    out = capsys.readouterr().out
+    # The default deep-house tempo/length surface in the summary.
+    assert "tempo=122" in out
+    assert "64 bar" in out
+
+
+def test_arrange_run_deep_house_runs_via_executor(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--job-path", str(out)],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    plan = load_job_plan(out)
+    # Leading set_tempo (122) + one place_scene per deep-house section.
+    assert plan.steps[0].command == "set_tempo"
+    assert plan.steps[0].params["bpm"] == 122.0
+    scene_steps = [s for s in plan.steps if s.command == "place_scene"]
+    assert len(scene_steps) == 7
+    assert executor.executed == list(plan.step_ids)
+    assert set(load_step_statuses(out).values()) == {StepStatus.SUCCEEDED}
+
+
+def test_arrange_run_deep_house_honors_tempo_bars_name(capsys):
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "deep-house",
+            "--tempo",
+            "124",
+            "--bars",
+            "80",
+            "--name",
+            "late_night_house",
+            "--dry-run",
+        ],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Explicit overrides win over deep-house's 122/64 defaults.
+    assert "late_night_house" in out
+    assert "tempo=124" in out
+    assert "80 bar" in out

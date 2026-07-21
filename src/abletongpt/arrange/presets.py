@@ -21,10 +21,13 @@ DEFAULT_ARRANGEMENT_NAME = "dark_tech_house"
 #: Style selected when a caller does not pass ``--style``.
 DEFAULT_STYLE = "dark-tech-house"
 
-# (section_id, name, source_scene, relative_length_bars, transition)
-# Start bars are derived (contiguous, 1-based) rather than stored, so the layout can be
-# rescaled to any total length while staying gap-free. The default lengths sum to 56.
-_SIMPLE_SECTIONS: tuple[tuple[str, str, str, int, str], ...] = (
+# A section spec row: (section_id, display_name, source_scene, relative_length_bars,
+# transition). Start bars are derived (contiguous, 1-based) rather than stored, so any
+# layout can be rescaled to a different total length while staying gap-free.
+_SectionSpec = tuple[str, str, str, int, str]
+
+#: dark-tech-house layout. Relative lengths sum to 56 (the built-in default length).
+_SIMPLE_SECTIONS: tuple[_SectionSpec, ...] = (
     ("intro", "Intro", "intro", 8, "none"),
     ("groove", "Groove", "groove", 16, "fill"),
     ("break", "Break", "break", 8, "break"),
@@ -32,47 +35,65 @@ _SIMPLE_SECTIONS: tuple[tuple[str, str, str, int, str], ...] = (
     ("outro", "Outro", "outro", 8, "none"),
 )
 
+#: deep-house layout: smoother and warmer than dark-tech-house, with a chord intro and a
+#: mid-track breakdown between two main grooves. Relative lengths sum to 64.
+_DEEP_HOUSE_SECTIONS: tuple[_SectionSpec, ...] = (
+    ("intro", "Intro", "intro", 8, "none"),
+    ("groove_a", "Groove A", "groove_a", 8, "fill"),
+    ("chord_intro", "Chord Intro", "chord_intro", 8, "none"),
+    ("main_groove", "Main Groove", "main_groove", 16, "fill"),
+    ("breakdown", "Breakdown", "breakdown", 8, "break"),
+    ("main_groove_2", "Main Groove 2", "main_groove_2", 8, "fill"),
+    ("outro", "Outro", "outro", 8, "none"),
+)
 
-def _scaled_lengths(total_bars: int) -> list[int]:
-    """Scale the default section lengths so they sum to exactly ``total_bars``.
+#: deep-house defaults, applied when the caller leaves tempo/length unset.
+DEEP_HOUSE_DEFAULT_NAME = "deep_house"
+DEEP_HOUSE_DEFAULT_TEMPO = 122.0
+DEEP_HOUSE_DEFAULT_BARS = 64
+
+
+def _scaled_lengths(base_lengths: list[int], total_bars: int) -> list[int]:
+    """Scale ``base_lengths`` so they sum to exactly ``total_bars``.
 
     Every section keeps its relative weight (rounded, at least 1 bar); the final section
     absorbs the rounding remainder so the total lands on ``total_bars`` precisely.
     """
-    base = [length for _, _, _, length, _ in _SIMPLE_SECTIONS]
-    base_total = sum(base)
-    scaled = [max(1, round(length * total_bars / base_total)) for length in base[:-1]]
+    base_total = sum(base_lengths)
+    scaled = [max(1, round(length * total_bars / base_total)) for length in base_lengths[:-1]]
     scaled.append(max(1, total_bars - sum(scaled)))
     return scaled
 
 
-def simple_arrangement(
-    name: str = DEFAULT_ARRANGEMENT_NAME,
+def _arrangement_from_spec(
+    name: str,
+    spec: tuple[_SectionSpec, ...],
     *,
-    tempo: float | None = None,
-    total_bars: int | None = None,
+    tempo: float | None,
+    total_bars: int | None,
 ) -> ArrangementPlan:
-    """Return the default dark-tech-house arrangement under ``name``.
+    """Build an :class:`ArrangementPlan` from a section ``spec``.
 
-    A valid, ready-to-use plan rather than a set of placeholders to fill in.
-    ``tempo`` (BPM) is carried onto the plan so ``build_job_plan`` emits a leading
-    ``set_tempo`` step. ``total_bars`` rescales the whole arrangement to that length; the
-    default (``None``) keeps the built-in 56-bar layout. Section start bars are always
-    recomputed contiguously from bar 1, so the result is gap-free at any length.
+    Shared by every style preset. ``tempo`` (BPM) is carried onto the plan so
+    ``build_job_plan`` emits a leading ``set_tempo`` step. ``total_bars`` rescales the
+    whole arrangement to that length (``None`` keeps the spec's built-in lengths). Section
+    start bars are always recomputed contiguously from bar 1, so the result is gap-free at
+    any length.
     """
     if total_bars is not None and total_bars <= 0:
         raise ValueError("total_bars must be positive (got %d)" % total_bars)
 
+    base_lengths = [length for _, _, _, length, _ in spec]
     lengths = (
-        _scaled_lengths(total_bars)
+        _scaled_lengths(base_lengths, total_bars)
         if total_bars is not None
-        else [length for _, _, _, length, _ in _SIMPLE_SECTIONS]
+        else base_lengths
     )
 
     sections: list[ArrangementSection] = []
     start_bar = 1
     for (section_id, display_name, source_scene, _base_length, transition), length in zip(
-        _SIMPLE_SECTIONS, lengths
+        spec, lengths
     ):
         sections.append(
             ArrangementSection(
@@ -86,6 +107,42 @@ def simple_arrangement(
         )
         start_bar += length
     return ArrangementPlan(name=name, sections=tuple(sections), tempo=tempo)
+
+
+def simple_arrangement(
+    name: str = DEFAULT_ARRANGEMENT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
+    """Return the default dark-tech-house arrangement under ``name``.
+
+    A valid, ready-to-use plan rather than a set of placeholders to fill in. The default
+    (``tempo``/``total_bars`` unset) keeps the built-in tempo-less 56-bar layout.
+    """
+    return _arrangement_from_spec(
+        name, _SIMPLE_SECTIONS, tempo=tempo, total_bars=total_bars
+    )
+
+
+def deep_house_arrangement(
+    name: str = DEEP_HOUSE_DEFAULT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
+    """Return the deep-house arrangement under ``name``.
+
+    Smoother and warmer than dark-tech-house. Unlike that preset, deep-house ships opinion
+    -ated defaults: 122 BPM and a 64-bar layout. An explicit ``tempo``/``total_bars`` (e.g.
+    from ``--tempo``/``--bars``) overrides them; leaving them unset applies the defaults.
+    """
+    return _arrangement_from_spec(
+        name,
+        _DEEP_HOUSE_SECTIONS,
+        tempo=DEEP_HOUSE_DEFAULT_TEMPO if tempo is None else tempo,
+        total_bars=DEEP_HOUSE_DEFAULT_BARS if total_bars is None else total_bars,
+    )
 
 
 # --- style registry --------------------------------------------------------------
@@ -102,10 +159,11 @@ class UnknownStyleError(ValueError):
     """
 
 
-#: style name -> arrangement builder. New genres (``minimal-techno``, ``deep-house``,
-#: ``dub-techno``, ...) join by adding one entry here; nothing else needs to change.
+#: style name -> arrangement builder. New genres (``minimal-techno``, ``dub-techno``, ...)
+#: join by adding one entry here; nothing else needs to change.
 _STYLE_BUILDERS: dict[str, StyleBuilder] = {
     "dark-tech-house": simple_arrangement,
+    "deep-house": deep_house_arrangement,
 }
 
 
