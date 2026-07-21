@@ -1202,3 +1202,56 @@ def test_arrange_run_describe_all_styles_json_includes_section_count(capsys):
 
     for entry in payload["styles"]:
         assert entry["section_count"] == len(entry["sections"])
+
+
+def test_arrange_run_describe_style_json_includes_duration_seconds(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "deep-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # deep-house: 64 bars * 4 beats at 122 BPM.
+    assert payload["tempo"] == 122.0
+    assert payload["total_bars"] == 64
+    assert payload["duration_seconds"] == round(64 * 4 * 60 / 122, 3)
+
+
+def test_arrange_run_describe_style_json_duration_null_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    # dark-tech-house carries no tempo, so its duration is undefined (null).
+    rc = main(
+        ["arrange-run", "--describe-style", "dark-tech-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tempo"] is None
+    assert payload["duration_seconds"] is None
+
+
+def test_arrange_run_describe_all_styles_json_includes_duration_seconds(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+
+    by_style = {entry["style"]: entry for entry in payload["styles"]}
+    # Present on every style; computed where a tempo exists, null where it does not.
+    for entry in payload["styles"]:
+        assert "duration_seconds" in entry
+    assert by_style["dark-tech-house"]["duration_seconds"] is None
+    assert by_style["deep-house"]["duration_seconds"] == round(64 * 4 * 60 / 122, 3)
