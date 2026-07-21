@@ -134,6 +134,12 @@ def _cmd_status(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
     return 0
 
 
+def _print_available_styles() -> None:
+    """Print every registered arrange-run style, one per line for shell-friendly output."""
+    for style in available_styles():
+        print(style)
+
+
 # --- arrange-run orchestration ---------------------------------------------------
 
 def _plan_overview(plan: JobPlan) -> str:
@@ -240,6 +246,10 @@ def run_arrangement(
 
 
 def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
+    if args.list_styles:
+        _print_available_styles()
+        return 0
+
     # Save only when a destination exists and the user did not opt out; there is nothing
     # to persist without ``--job-path``.
     save = args.job_path is not None and not args.no_save
@@ -308,6 +318,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Arrangement style preset (default: %(default)s; available: "
         + ", ".join(available_styles())
         + "). Ignored with --resume.",
+    )
+    arrange_run.add_argument(
+        "--list-styles",
+        action="store_true",
+        help="Print available arrangement style presets and exit without running.",
     )
     arrange_run.add_argument(
         "--name",

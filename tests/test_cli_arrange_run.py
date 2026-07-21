@@ -752,3 +752,40 @@ def test_arrange_run_dub_techno_honors_tempo_bars_name(capsys):
     assert "job plan 'echo_chamber'" in out
     assert "tempo=126" in out
     assert "80 bar" in out
+
+# --- style listing ---------------------------------------------------------------
+
+def test_arrange_run_list_styles_prints_registered_styles(capsys):
+    executor = FakeExecutor()
+
+    rc = main(["arrange-run", "--list-styles"], executor_factory=_factory(executor))
+
+    assert rc == 0
+    assert executor.executed == []
+    assert capsys.readouterr().out.splitlines() == list(available_styles())
+
+
+def test_arrange_run_list_styles_exits_before_style_validation_and_saving(
+    tmp_path: Path, capsys
+):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--list-styles",
+            "--style",
+            "unknown",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert not out.exists()
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == list(available_styles())
+    assert captured.err == ""
