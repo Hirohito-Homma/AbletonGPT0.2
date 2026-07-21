@@ -52,6 +52,24 @@ DEEP_HOUSE_DEFAULT_NAME = "deep_house"
 DEEP_HOUSE_DEFAULT_TEMPO = 122.0
 DEEP_HOUSE_DEFAULT_BARS = 64
 
+#: minimal-techno layout: more mechanical and repetitive than deep-house, and more pared
+#: back than dark-tech-house -- a hypnotic build of pulse/hat/bass layers around a single
+#: breakdown and drive. Relative lengths sum to 64.
+_MINIMAL_TECHNO_SECTIONS: tuple[_SectionSpec, ...] = (
+    ("intro", "Intro", "intro", 8, "none"),
+    ("pulse_groove", "Pulse Groove", "pulse_groove", 8, "fill"),
+    ("hat_motion", "Hat Motion", "hat_motion", 8, "none"),
+    ("bass_lock", "Bass Lock", "bass_lock", 16, "fill"),
+    ("breakdown", "Breakdown", "breakdown", 8, "break"),
+    ("main_drive", "Main Drive", "main_drive", 8, "fill"),
+    ("outro", "Outro", "outro", 8, "none"),
+)
+
+#: minimal-techno defaults, applied when the caller leaves tempo/length unset.
+MINIMAL_TECHNO_DEFAULT_NAME = "minimal_techno"
+MINIMAL_TECHNO_DEFAULT_TEMPO = 126.0
+MINIMAL_TECHNO_DEFAULT_BARS = 64
+
 
 def _scaled_lengths(base_lengths: list[int], total_bars: int) -> list[int]:
     """Scale ``base_lengths`` so they sum to exactly ``total_bars``.
@@ -145,6 +163,27 @@ def deep_house_arrangement(
     )
 
 
+def minimal_techno_arrangement(
+    name: str = MINIMAL_TECHNO_DEFAULT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
+    """Return the minimal-techno arrangement under ``name``.
+
+    More mechanical and repetitive than deep-house, more stripped back than
+    dark-tech-house. Ships opinionated defaults: 126 BPM and a 64-bar layout. An explicit
+    ``tempo``/``total_bars`` (e.g. from ``--tempo``/``--bars``) overrides them; leaving them
+    unset applies the defaults.
+    """
+    return _arrangement_from_spec(
+        name,
+        _MINIMAL_TECHNO_SECTIONS,
+        tempo=MINIMAL_TECHNO_DEFAULT_TEMPO if tempo is None else tempo,
+        total_bars=MINIMAL_TECHNO_DEFAULT_BARS if total_bars is None else total_bars,
+    )
+
+
 # --- style registry --------------------------------------------------------------
 
 #: Builder signature shared by every style preset: ``(name, *, tempo, total_bars)``.
@@ -159,11 +198,12 @@ class UnknownStyleError(ValueError):
     """
 
 
-#: style name -> arrangement builder. New genres (``minimal-techno``, ``dub-techno``, ...)
-#: join by adding one entry here; nothing else needs to change.
+#: style name -> arrangement builder. New genres (``dub-techno``, ...) join by adding one
+#: entry here; nothing else needs to change.
 _STYLE_BUILDERS: dict[str, StyleBuilder] = {
     "dark-tech-house": simple_arrangement,
     "deep-house": deep_house_arrangement,
+    "minimal-techno": minimal_techno_arrangement,
 }
 
 

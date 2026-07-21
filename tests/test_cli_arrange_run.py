@@ -561,3 +561,98 @@ def test_resume_keeps_existing_name_over_style_default(tmp_path: Path):
     assert rc == 0
     # Resume reloads the saved plan; the deep-house default name never applies.
     assert load_job_plan(out).name == "my_saved_set"
+
+
+# --- minimal-techno style --------------------------------------------------------
+
+def test_available_styles_includes_minimal_techno():
+    styles = available_styles()
+    assert "dark-tech-house" in styles
+    assert "deep-house" in styles
+    assert "minimal-techno" in styles
+
+
+def test_default_name_for_minimal_techno():
+    assert default_name_for_style("minimal-techno") == "minimal_techno"
+
+
+def test_arrangement_for_style_minimal_techno_returns_plan():
+    plan = arrangement_for_style("minimal-techno", "warehouse")
+
+    assert isinstance(plan, ArrangementPlan)
+    assert plan.name == "warehouse"
+    section_ids = [section.section_id for section in plan.sections]
+    assert section_ids == [
+        "intro",
+        "pulse_groove",
+        "hat_motion",
+        "bass_lock",
+        "breakdown",
+        "main_drive",
+        "outro",
+    ]
+    # minimal-techno ships opinionated defaults: 126 BPM over a 64-bar layout.
+    assert plan.tempo == 126.0
+    assert sum(section.length_bars for section in plan.sections) == 64
+
+
+def test_arrange_run_minimal_techno_dry_run_succeeds(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "minimal-techno", "--dry-run"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []  # dry-run never touches the executor
+    out = capsys.readouterr().out
+    # Default name, tempo, and length all surface in the summary.
+    assert "job plan 'minimal_techno'" in out
+    assert "tempo=126" in out
+    assert "64 bar" in out
+
+
+def test_arrange_run_minimal_techno_runs_via_executor(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "minimal-techno", "--job-path", str(out)],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    plan = load_job_plan(out)
+    # Leading set_tempo (126) + one place_scene per minimal-techno section.
+    assert plan.steps[0].command == "set_tempo"
+    assert plan.steps[0].params["bpm"] == 126.0
+    scene_steps = [s for s in plan.steps if s.command == "place_scene"]
+    assert len(scene_steps) == 7
+    assert executor.executed == list(plan.step_ids)
+    assert set(load_step_statuses(out).values()) == {StepStatus.SUCCEEDED}
+
+
+def test_arrange_run_minimal_techno_honors_tempo_bars_name(capsys):
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "minimal-techno",
+            "--tempo",
+            "128",
+            "--bars",
+            "80",
+            "--name",
+            "warehouse_loop",
+            "--dry-run",
+        ],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Explicit overrides win over minimal-techno's 126/64 defaults.
+    assert "job plan 'warehouse_loop'" in out
+    assert "tempo=128" in out
+    assert "80 bar" in out
