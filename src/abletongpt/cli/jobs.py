@@ -131,7 +131,23 @@ def _cmd_resume(args: argparse.Namespace, factory: ExecutorFactory) -> int:
 
 
 def _cmd_status(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
-    _print_counts(load_step_statuses(args.plan))
+    statuses = load_step_statuses(args.plan)
+    if args.json:
+        completed, failed, pending = _counts(statuses)
+        print(
+            json.dumps(
+                {
+                    "completed": completed,
+                    "failed": failed,
+                    "pending": pending,
+                    "total": completed + failed + pending,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    _print_counts(statuses)
     return 0
 
 
@@ -595,6 +611,11 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="Show completed/failed/pending counts without executing."
     )
     status.add_argument("--plan", required=True, help="Path to a job plan JSON file.")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the completed/failed/pending/total counts as JSON.",
+    )
     status.set_defaults(func=_cmd_status)
 
     arrange_run = sub.add_parser(

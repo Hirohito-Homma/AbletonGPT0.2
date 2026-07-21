@@ -124,6 +124,26 @@ def test_status_reports_counts_without_executing(tmp_path: Path, capsys):
     assert "completed=1 failed=1 pending=1" in capsys.readouterr().out
 
 
+def test_status_json_reports_counts(tmp_path: Path, capsys):
+    plan = _sample_plan()
+    path = tmp_path / "plan.json"
+    save_job_plan(
+        plan,
+        path,
+        statuses={
+            "00_a": StepStatus.SUCCEEDED,
+            "01_b": StepStatus.FAILED,
+            # 02_c omitted -> pending
+        },
+    )
+
+    rc = main(["status", "--plan", str(path), "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"completed": 1, "failed": 1, "pending": 1, "total": 3}
+
+
 # --- run -------------------------------------------------------------------------
 
 def test_run_executes_pending_steps_and_resaves_status(tmp_path: Path, capsys):
