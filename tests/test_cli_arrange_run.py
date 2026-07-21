@@ -789,3 +789,60 @@ def test_arrange_run_list_styles_exits_before_style_validation_and_saving(
     captured = capsys.readouterr()
     assert captured.out.splitlines() == list(available_styles())
     assert captured.err == ""
+
+# --- style description -----------------------------------------------------------
+
+def test_arrange_run_describe_style_prints_style_summary(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "dub-techno"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    out = capsys.readouterr().out
+    assert "style: dub-techno" in out
+    assert "job plan 'dub_techno'" in out
+    assert "tempo=124" in out
+    assert "64 bar" in out
+
+
+def test_arrange_run_describe_style_does_not_save_or_execute(tmp_path: Path, capsys):
+    out = tmp_path / "plan.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--describe-style",
+            "minimal-techno",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert not out.exists()
+    printed = capsys.readouterr().out
+    assert "style: minimal-techno" in printed
+    assert "job plan 'minimal_techno'" in printed
+
+
+def test_arrange_run_describe_style_unknown_style_fails_clearly(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "unknown"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 2
+    assert executor.executed == []
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "arrange-run: unsupported style: 'unknown'" in captured.err
+    assert "dark-tech-house" in captured.err
