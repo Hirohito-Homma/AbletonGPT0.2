@@ -158,12 +158,25 @@ def _style_description(style: str) -> dict[str, object]:
         for step in plan.steps
         if step.command == "place_scene"
     )
+    sections = [
+        {
+            "section_id": section.section_id,
+            "name": section.name,
+            "source_scene": section.source_scene,
+            "start_bar": section.start_bar,
+            "length_bars": section.length_bars,
+            "transition": section.transition,
+            "tags": list(section.tags),
+        }
+        for section in arrangement.sections
+    ]
     return {
         "style": style,
         "name": plan.name,
         "step_count": len(plan.steps),
         "tempo": float(tempo) if tempo is not None else None,
         "total_bars": total_bars,
+        "sections": sections,
     }
 
 
