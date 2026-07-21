@@ -14,11 +14,9 @@ the default is :class:`~abletongpt.jobs.AbletonStepExecutor`.
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
-from ..arrange.models import ArrangementPlan, ArrangementSection
+from .serialization import arrangement_from_dict, read_json_document
 from ..jobs import (
     AbletonStepExecutor,
     JobPlan,
@@ -43,29 +41,6 @@ _COMPLETED = (StepStatus.SUCCEEDED, StepStatus.SKIPPED)
 def _default_executor_factory() -> StepExecutor:
     # AbletonBridge() reads config but does not connect until a step actually runs.
     return AbletonStepExecutor()
-
-
-# --- arrangement JSON -> model ---------------------------------------------------
-
-def _arrangement_from_dict(document: dict[str, Any]) -> ArrangementPlan:
-    """Reconstruct an :class:`ArrangementPlan` from a plain JSON document.
-
-    Mirrors the model's fields exactly; ``transition`` and ``tags`` fall back to the
-    dataclass defaults when omitted.
-    """
-    sections = tuple(
-        ArrangementSection(
-            section_id=raw["section_id"],
-            name=raw["name"],
-            source_scene=raw["source_scene"],
-            start_bar=int(raw["start_bar"]),
-            length_bars=int(raw["length_bars"]),
-            transition=raw.get("transition", "none"),
-            tags=tuple(raw.get("tags", ())),
-        )
-        for raw in document.get("sections", [])
-    )
-    return ArrangementPlan(name=document["name"], sections=sections)
 
 
 # --- progress accounting ---------------------------------------------------------
@@ -106,8 +81,8 @@ def _print_counts(statuses: dict[str, StepStatus]) -> tuple[int, int, int]:
 # --- subcommands -----------------------------------------------------------------
 
 def _cmd_create(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
-    document = json.loads(Path(args.arrangement).read_text(encoding="utf-8"))
-    arrangement = _arrangement_from_dict(document)
+    document = read_json_document(args.arrangement)
+    arrangement = arrangement_from_dict(document)
     job_plan = build_job_plan(arrangement)
     out_path = save_job_plan(job_plan, args.out)  # creates parent dirs
     print(
