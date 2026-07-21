@@ -18,11 +18,18 @@ the default is :class:`~abletongpt.jobs.AbletonStepExecutor`.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Callable
 
 from .serialization import arrangement_from_dict, read_json_document
-from ..arrange.presets import DEFAULT_ARRANGEMENT_NAME, simple_arrangement
+from ..arrange.presets import (
+    DEFAULT_ARRANGEMENT_NAME,
+    DEFAULT_STYLE,
+    UnknownStyleError,
+    arrangement_for_style,
+    available_styles,
+)
 from ..jobs import (
     AbletonStepExecutor,
     JobPlan,
@@ -155,6 +162,7 @@ def _plan_overview(plan: JobPlan) -> str:
 
 def _prepare_job_plan(
     *,
+    style: str,
     name: str,
     job_path: str | None,
     resume: bool,
@@ -165,10 +173,11 @@ def _prepare_job_plan(
 
     Resume path: when ``--resume`` is set and ``job_path`` already holds a saved plan,
     reload it plus its progress so completed steps are skipped -- the on-disk plan wins,
-    so ``--tempo``/``--bars``/``--name`` are deliberately ignored and never regenerate it.
-    Otherwise build a fresh arrangement (honoring ``name``/``tempo``/``bars``) -> job plan,
-    with empty prior progress. Falling back to a fresh build (rather than erroring) keeps
-    ``--resume`` safe to pass on a first run.
+    so ``--style``/``--tempo``/``--bars``/``--name`` are deliberately ignored and never
+    regenerate it. Otherwise build a fresh arrangement for ``style`` (honoring
+    ``name``/``tempo``/``bars``) -> job plan, with empty prior progress. Falling back to a
+    fresh build (rather than erroring) keeps ``--resume`` safe to pass on a first run.
+    Raises :class:`UnknownStyleError` when a fresh build is asked for an unknown style.
     """
     if resume and job_path and Path(job_path).exists():
         plan = load_job_plan(job_path)
@@ -177,13 +186,14 @@ def _prepare_job_plan(
             sid for sid, status in prior.items() if status in _COMPLETED
         )
         return plan, prior, completed
-    arrangement = simple_arrangement(name, tempo=tempo, total_bars=bars)
+    arrangement = arrangement_for_style(style, name, tempo=tempo, total_bars=bars)
     return build_job_plan(arrangement), {}, ()
 
 
 def run_arrangement(
     factory: ExecutorFactory,
     *,
+    style: str = DEFAULT_STYLE,
     name: str = DEFAULT_ARRANGEMENT_NAME,
     job_path: str | None = None,
     save: bool = True,
@@ -194,15 +204,21 @@ def run_arrangement(
 ) -> int:
     """Build (or reload) an arrangement's job plan and run it end-to-end.
 
-    One-shot glue over the existing engines: ``simple_arrangement`` -> ``build_job_plan``
-    -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``tempo`` (BPM)
-    and ``bars`` (total length) shape the generated arrangement; both are ignored on the
-    ``resume`` path, where the saved plan takes precedence. ``dry_run`` prints the plan
-    summary and returns without touching the executor or disk. Returns a process exit code
-    (0 ok, 1 if any step failed).
+    One-shot glue over the existing engines: ``arrangement_for_style`` -> ``build_job_plan``
+    -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``style`` picks
+    the genre preset; ``tempo`` (BPM) and ``bars`` (total length) shape it. All three are
+    ignored on the ``resume`` path, where the saved plan takes precedence. ``dry_run``
+    prints the plan summary and returns without touching the executor or disk. Returns a
+    process exit code (0 ok, 1 if any step failed). Raises :class:`UnknownStyleError` for
+    an unknown style on a fresh build.
     """
     plan, prior, completed = _prepare_job_plan(
-        name=name, job_path=job_path, resume=resume, tempo=tempo, bars=bars
+        style=style,
+        name=name,
+        job_path=job_path,
+        resume=resume,
+        tempo=tempo,
+        bars=bars,
     )
 
     if dry_run:
@@ -227,16 +243,23 @@ def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
     # Save only when a destination exists and the user did not opt out; there is nothing
     # to persist without ``--job-path``.
     save = args.job_path is not None and not args.no_save
-    return run_arrangement(
-        factory,
-        name=args.name,
-        job_path=args.job_path,
-        save=save,
-        dry_run=args.dry_run,
-        resume=args.resume,
-        tempo=args.tempo,
-        bars=args.bars,
-    )
+    try:
+        return run_arrangement(
+            factory,
+            style=args.style,
+            name=args.name,
+            job_path=args.job_path,
+            save=save,
+            dry_run=args.dry_run,
+            resume=args.resume,
+            tempo=args.tempo,
+            bars=args.bars,
+        )
+    except UnknownStyleError as exc:
+        # Turn an unknown --style into a clear, non-zero CLI failure (exit 2, matching
+        # argparse's convention for usage errors) rather than a traceback.
+        print("arrange-run: %s" % exc, file=sys.stderr)
+        return 2
 
 
 # --- argument parsing ------------------------------------------------------------
@@ -278,6 +301,13 @@ def build_parser() -> argparse.ArgumentParser:
     arrange_run = sub.add_parser(
         "arrange-run",
         help="Generate a default arrangement, build a job plan, and run it end-to-end.",
+    )
+    arrange_run.add_argument(
+        "--style",
+        default=DEFAULT_STYLE,
+        help="Arrangement style preset (default: %(default)s; available: "
+        + ", ".join(available_styles())
+        + "). Ignored with --resume.",
     )
     arrange_run.add_argument(
         "--name",

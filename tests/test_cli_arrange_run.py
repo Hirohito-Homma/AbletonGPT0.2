@@ -286,3 +286,98 @@ def test_resume_ignores_new_tempo_and_bars(tmp_path: Path):
     assert len(tempo_steps) == 1
     assert tempo_steps[0].params["bpm"] == 120
     assert plan.step_ids == seed.step_ids
+
+
+# --- style selection: --style ----------------------------------------------------
+
+def test_default_style_matches_dark_tech_house(tmp_path: Path):
+    # No --style: the default must produce exactly the built-in dark-tech-house plan.
+    default_out = tmp_path / "default.json"
+    styled_out = tmp_path / "styled.json"
+
+    rc_default = main(
+        ["arrange-run", "--job-path", str(default_out)],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    rc_styled = main(
+        ["arrange-run", "--job-path", str(styled_out), "--style", "dark-tech-house"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc_default == 0 and rc_styled == 0
+    assert load_job_plan(default_out).step_ids == _DEFAULT_STEP_IDS
+    # Explicit style == default: identical plans.
+    assert load_job_plan(styled_out).step_ids == _DEFAULT_STEP_IDS
+
+
+def test_style_dark_tech_house_runs(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "dark-tech-house"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == list(_DEFAULT_STEP_IDS)
+    assert "failed=0" in capsys.readouterr().out
+
+
+def test_unknown_style_fails_clearly(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "unknown", "--dry-run"],
+        executor_factory=_factory(executor),
+    )
+
+    # Non-zero exit, nothing executed, and a message that names the bad style plus
+    # the styles that are actually available.
+    assert rc != 0
+    assert executor.executed == []
+    err = capsys.readouterr().err
+    assert "unsupported style" in err
+    assert "'unknown'" in err
+    assert "dark-tech-house" in err
+
+
+def test_style_combines_with_tempo_bars_name(tmp_path: Path, capsys):
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "dark-tech-house",
+            "--tempo",
+            "126",
+            "--bars",
+            "64",
+            "--name",
+            "styled_song",
+            "--dry-run",
+        ],
+        executor_factory=_factory(FakeExecutor()),
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "styled_song" in out
+    assert "tempo=126" in out
+    assert "64 bar" in out
+
+
+def test_resume_ignores_style(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    # Seed a distinctive existing plan.
+    seed = build_job_plan(simple_arrangement("seeded", tempo=120))
+    save_job_plan(seed, out)
+
+    # An unknown style would fail on a fresh build, but resume must not regenerate:
+    # it reloads the saved plan and ignores --style entirely.
+    executor = FakeExecutor()
+    rc = main(
+        ["arrange-run", "--job-path", str(out), "--resume", "--style", "unknown"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert load_job_plan(out).step_ids == seed.step_ids
