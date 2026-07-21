@@ -341,6 +341,40 @@ def _plan_overview(plan: JobPlan) -> str:
     return ", ".join(parts)
 
 
+def _plan_scene_lines(plan: JobPlan) -> list[str]:
+    """Indented per-scene timeline lines for a job plan's placed scenes.
+
+    Mirrors the describe-style timeline (:func:`_section_line`): each ``place_scene`` step
+    becomes one line labelled by its source scene, with its bar span and -- when the plan
+    carries a tempo -- clock times. Works for both freshly built and ``--resume``-reloaded
+    plans, since it reads bars/tempo back out of the steps.
+    """
+    tempo = _tempo_of(plan)
+    lines: list[str] = []
+    for step in plan.steps:
+        if step.command != "place_scene":
+            continue
+        start_bar = int(step.params.get("start_bar", 0))
+        length_bars = int(step.params.get("length_bars", 0))
+        start = _duration_seconds(tempo, start_bar - 1)
+        duration = _duration_seconds(tempo, length_bars)
+        lines.append(
+            _section_line(
+                {
+                    "section_id": step.params.get("source_scene", "?"),
+                    "start_bar": start_bar,
+                    "end_bar": start_bar + length_bars,
+                    "length_bars": length_bars,
+                    "start_seconds": start,
+                    "start_formatted": _duration_label(start),
+                    "duration_seconds": duration,
+                    "duration_formatted": _duration_label(duration),
+                }
+            )
+        )
+    return lines
+
+
 def _step_summaries(plan: JobPlan) -> list[dict[str, object]]:
     """Machine-friendly per-step dicts for a job plan (no status: nothing has run)."""
     return [
@@ -464,6 +498,8 @@ def run_arrangement(
 
     if dry_run:
         print("dry-run: would run %s (no execution)" % _plan_overview(plan))
+        for line in _plan_scene_lines(plan):
+            print(line)
         return 0
 
     persist = save and job_path is not None
