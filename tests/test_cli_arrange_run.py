@@ -862,6 +862,7 @@ def test_arrange_run_describe_style_json_prints_machine_readable_summary(capsys)
     assert payload["style"] == "dub-techno"
     assert payload["name"] == "dub_techno"
     assert payload["step_count"] == 8
+    assert payload["section_count"] == len(payload["sections"])
     assert payload["tempo"] == 124.0
     assert payload["total_bars"] == 64
     assert payload["sections"]
@@ -1038,3 +1039,18 @@ def test_arrange_run_describe_all_styles_json_includes_sections(capsys):
         ]
         for section in sections:
             assert section["end_bar"] == section["start_bar"] + section["length_bars"]
+
+def test_arrange_run_describe_all_styles_json_includes_section_count(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+
+    for entry in payload["styles"]:
+        assert entry["section_count"] == len(entry["sections"])
