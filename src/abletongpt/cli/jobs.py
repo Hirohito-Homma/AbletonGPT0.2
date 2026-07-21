@@ -175,6 +175,7 @@ def _style_description(style: str) -> dict[str, object]:
         "style": style,
         "name": plan.name,
         "step_count": len(plan.steps),
+        "section_count": len(sections),
         "tempo": float(tempo) if tempo is not None else None,
         "total_bars": total_bars,
         "sections": sections,
