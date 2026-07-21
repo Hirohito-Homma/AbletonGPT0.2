@@ -28,7 +28,12 @@ from .serialization import (
 # --- validation ------------------------------------------------------------------
 
 def _validation_errors(plan: ArrangementPlan) -> list[str]:
-    """Return human-readable problems with ``plan`` (empty list = valid)."""
+    """Return human-readable problems with ``plan`` (empty list = valid).
+
+    Flags empty arrangements, duplicate section ids, non-positive bars, and sections
+    whose bar ranges overlap. Gaps between sections are deliberately *not* flagged --
+    silence between sections is legitimate -- only overlaps, which are unambiguous errors.
+    """
     errors: list[str] = []
     if not plan.sections:
         errors.append("arrangement has no sections")
@@ -48,6 +53,43 @@ def _validation_errors(plan: ArrangementPlan) -> list[str]:
                 "section %r: length_bars must be positive (got %d)"
                 % (section.section_id, section.length_bars)
             )
+
+    errors.extend(_overlap_errors(plan))
+    return errors
+
+
+def _overlap_errors(plan: ArrangementPlan) -> list[str]:
+    """Report sections whose bar ranges overlap on the timeline.
+
+    Only well-formed sections (positive start and length) take part; malformed ones are
+    already reported by the caller. A left-to-right sweep over sections sorted by start
+    bar catches any overlap: a section that begins before the furthest end seen so far
+    shares at least one bar with an earlier section. ``end`` is exclusive, so a section
+    ending at bar N and the next starting at N are contiguous, not overlapping.
+    """
+    errors: list[str] = []
+    placed = sorted(
+        (s for s in plan.sections if s.start_bar > 0 and s.length_bars > 0),
+        key=lambda s: s.start_bar,
+    )
+    furthest_end = 0
+    furthest_id: str | None = None
+    for section in placed:
+        if section.start_bar < furthest_end:
+            errors.append(
+                "section %r overlaps section %r (starts at bar %d, but %r runs through bar %d)"
+                % (
+                    section.section_id,
+                    furthest_id,
+                    section.start_bar,
+                    furthest_id,
+                    furthest_end - 1,
+                )
+            )
+        end = section.start_bar + section.length_bars
+        if end > furthest_end:
+            furthest_end = end
+            furthest_id = section.section_id
     return errors
 
 

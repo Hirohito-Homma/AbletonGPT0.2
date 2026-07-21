@@ -129,6 +129,67 @@ def test_validate_rejects_non_positive_length_bars(tmp_path: Path, capsys):
     assert "length_bars must be positive" in capsys.readouterr().err
 
 
+def test_validate_rejects_overlapping_sections(tmp_path: Path, capsys):
+    # 'a' covers bars 1-8; 'b' starts at bar 5, inside 'a' -> overlap.
+    arr = _write(
+        tmp_path / "overlap.json",
+        {
+            "name": "overlap",
+            "sections": [
+                {"section_id": "a", "name": "A", "source_scene": "a", "start_bar": 1, "length_bars": 8},
+                {"section_id": "b", "name": "B", "source_scene": "b", "start_bar": 5, "length_bars": 8},
+            ],
+        },
+    )
+
+    rc = main(["validate", "--arrangement", str(arr)])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "overlaps" in err
+    assert "'b'" in err and "'a'" in err
+
+
+def test_validate_allows_gaps_between_sections(tmp_path: Path, capsys):
+    # 'a' ends at bar 8, 'b' starts at bar 20: a gap, which is legitimate (silence),
+    # so validation must accept it rather than flag it like an overlap.
+    arr = _write(
+        tmp_path / "gap.json",
+        {
+            "name": "gap",
+            "sections": [
+                {"section_id": "a", "name": "A", "source_scene": "a", "start_bar": 1, "length_bars": 8},
+                {"section_id": "b", "name": "B", "source_scene": "b", "start_bar": 20, "length_bars": 8},
+            ],
+        },
+    )
+
+    rc = main(["validate", "--arrangement", str(arr)])
+
+    assert rc == 0
+    assert "2 section" in capsys.readouterr().out
+
+
+def test_validate_accepts_contiguous_touching_sections(tmp_path: Path, capsys):
+    # 'a' covers bars 1-8, 'b' starts at bar 9 (exactly where 'a' ends): touching,
+    # not overlapping. The exclusive end bar must not be treated as a shared bar.
+    arr = _write(
+        tmp_path / "touch.json",
+        {
+            "name": "touch",
+            "sections": [
+                {"section_id": "a", "name": "A", "source_scene": "a", "start_bar": 1, "length_bars": 8},
+                {"section_id": "b", "name": "B", "source_scene": "b", "start_bar": 9, "length_bars": 8},
+            ],
+        },
+    )
+
+    rc = main(["validate", "--arrangement", str(arr)])
+
+    assert rc == 0
+    assert "2 section" in capsys.readouterr().out
+
+
 # --- validate --json -------------------------------------------------------------
 
 def test_validate_json_reports_valid_arrangement(tmp_path: Path, capsys):
