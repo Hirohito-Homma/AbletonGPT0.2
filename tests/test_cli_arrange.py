@@ -190,6 +190,85 @@ def test_validate_accepts_contiguous_touching_sections(tmp_path: Path, capsys):
     assert "2 section" in capsys.readouterr().out
 
 
+# --- validate --strict -----------------------------------------------------------
+
+def _gapped(path: Path) -> Path:
+    # 'a' ends at bar 8, 'b' starts at bar 20: an 11-bar gap (bars 9-19 unused).
+    return _write(
+        path,
+        {
+            "name": "gap",
+            "sections": [
+                {"section_id": "a", "name": "A", "source_scene": "a", "start_bar": 1, "length_bars": 8},
+                {"section_id": "b", "name": "B", "source_scene": "b", "start_bar": 20, "length_bars": 8},
+            ],
+        },
+    )
+
+
+def test_validate_strict_flags_gap_that_default_allows(tmp_path: Path, capsys):
+    arr = _gapped(tmp_path / "gap.json")
+
+    rc = main(["validate", "--arrangement", str(arr), "--strict"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "gap between section 'a' and 'b'" in err
+    assert "bars 9-19 unused" in err
+
+
+def test_validate_without_strict_still_allows_gap(tmp_path: Path, capsys):
+    # The same gapped arrangement must remain valid without --strict (default behavior).
+    arr = _gapped(tmp_path / "gap.json")
+
+    rc = main(["validate", "--arrangement", str(arr)])
+
+    assert rc == 0
+    assert "gap" not in capsys.readouterr().err
+
+
+def test_validate_strict_flags_arrangement_not_starting_at_bar_1(tmp_path: Path, capsys):
+    arr = _write(
+        tmp_path / "lead.json",
+        {
+            "name": "lead",
+            "sections": [
+                {"section_id": "a", "name": "A", "source_scene": "a", "start_bar": 5, "length_bars": 8},
+            ],
+        },
+    )
+
+    rc = main(["validate", "--arrangement", str(arr), "--strict"])
+
+    assert rc == 1
+    assert "should start at bar 1" in capsys.readouterr().err
+
+
+def test_validate_strict_accepts_contiguous_arrangement(tmp_path: Path, capsys):
+    # create-simple lays out a contiguous, bar-1-anchored arrangement.
+    arr = tmp_path / "arr.json"
+    main(["create-simple", "--name", "ok", "--out", str(arr)])
+    capsys.readouterr()  # drop create-simple output
+
+    rc = main(["validate", "--arrangement", str(arr), "--strict"])
+
+    assert rc == 0
+    assert "5 section" in capsys.readouterr().out
+
+
+def test_validate_strict_json_carries_gap_error(tmp_path: Path, capsys):
+    arr = _gapped(tmp_path / "gap.json")
+
+    rc = main(["validate", "--arrangement", str(arr), "--strict", "--json"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["valid"] is False
+    assert any("gap between" in err for err in payload["errors"])
+
+
 # --- validate --json -------------------------------------------------------------
 
 def test_validate_json_reports_valid_arrangement(tmp_path: Path, capsys):
