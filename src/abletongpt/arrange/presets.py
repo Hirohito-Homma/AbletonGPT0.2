@@ -172,23 +172,43 @@ def available_styles() -> tuple[str, ...]:
     return tuple(_STYLE_BUILDERS)
 
 
+def _builder_for_style(style: str) -> StyleBuilder:
+    """Return the registered builder for ``style`` or raise :class:`UnknownStyleError`."""
+    try:
+        return _STYLE_BUILDERS[style]
+    except KeyError:
+        raise UnknownStyleError(
+            "unsupported style: %r (available: %s)"
+            % (style, ", ".join(available_styles()))
+        ) from None
+
+
+def default_name_for_style(style: str) -> str:
+    """Return the natural default arrangement name for ``style``.
+
+    This is the name used when the CLI's ``--name`` is omitted, sourced from each builder's
+    own default (e.g. ``dark_tech_house``, ``deep_house``) so there is a single source of
+    truth per style. Raises :class:`UnknownStyleError` for an unregistered style.
+    """
+    builder = _builder_for_style(style)
+    return builder().name
+
+
 def arrangement_for_style(
     style: str,
-    name: str = DEFAULT_ARRANGEMENT_NAME,
+    name: str | None = None,
     *,
     tempo: float | None = None,
     total_bars: int | None = None,
 ) -> ArrangementPlan:
     """Build the arrangement for ``style`` (one entry point for every genre preset).
 
-    Delegates to the registered builder for ``style``, forwarding ``name``/``tempo``/
-    ``total_bars``. Raises :class:`UnknownStyleError` for an unregistered style.
+    Delegates to the registered builder for ``style``, forwarding ``tempo``/``total_bars``.
+    When ``name`` is ``None`` the builder's own style-specific default name is used (e.g.
+    ``deep_house`` for deep-house); an explicit ``name`` overrides it. Raises
+    :class:`UnknownStyleError` for an unregistered style.
     """
-    try:
-        builder = _STYLE_BUILDERS[style]
-    except KeyError:
-        raise UnknownStyleError(
-            "unsupported style: %r (available: %s)"
-            % (style, ", ".join(available_styles()))
-        ) from None
+    builder = _builder_for_style(style)
+    if name is None:
+        return builder(tempo=tempo, total_bars=total_bars)
     return builder(name, tempo=tempo, total_bars=total_bars)

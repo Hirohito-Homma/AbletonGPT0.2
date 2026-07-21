@@ -22,6 +22,7 @@ from abletongpt.arrange.models import ArrangementPlan
 from abletongpt.arrange.presets import (
     arrangement_for_style,
     available_styles,
+    default_name_for_style,
     simple_arrangement,
 )
 
@@ -489,3 +490,74 @@ def test_arrange_run_deep_house_honors_tempo_bars_name(capsys):
     assert "late_night_house" in out
     assert "tempo=124" in out
     assert "80 bar" in out
+
+
+# --- style-specific default names ------------------------------------------------
+
+def test_default_name_for_style_maps_each_style():
+    assert default_name_for_style("dark-tech-house") == "dark_tech_house"
+    assert default_name_for_style("deep-house") == "deep_house"
+
+
+def test_arrange_run_default_name_follows_style(tmp_path: Path, capsys):
+    # dark-tech-house: --name omitted -> dark_tech_house.
+    dark_out = tmp_path / "dark.json"
+    rc_dark = main(
+        ["arrange-run", "--style", "dark-tech-house", "--job-path", str(dark_out)],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc_dark == 0
+    assert load_job_plan(dark_out).name == "dark_tech_house"
+
+    # deep-house: --name omitted -> deep_house (no longer the dark_tech_house default).
+    deep_out = tmp_path / "deep.json"
+    rc_deep = main(
+        ["arrange-run", "--style", "deep-house", "--job-path", str(deep_out)],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc_deep == 0
+    assert load_job_plan(deep_out).name == "deep_house"
+
+
+def test_arrange_run_default_name_shown_in_dry_run(capsys):
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run"],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc == 0
+    assert "job plan 'deep_house'" in capsys.readouterr().out
+
+
+def test_explicit_name_overrides_style_default(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "deep-house",
+            "--name",
+            "late_night_house",
+            "--job-path",
+            str(out),
+        ],
+        executor_factory=_factory(FakeExecutor()),
+    )
+    assert rc == 0
+    assert load_job_plan(out).name == "late_night_house"
+
+
+def test_resume_keeps_existing_name_over_style_default(tmp_path: Path):
+    out = tmp_path / "plan.json"
+    # Seed a plan whose name matches neither style default.
+    seed = build_job_plan(simple_arrangement("my_saved_set"))
+    save_job_plan(seed, out)
+
+    executor = FakeExecutor()
+    rc = main(
+        ["arrange-run", "--job-path", str(out), "--resume", "--style", "deep-house"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    # Resume reloads the saved plan; the deep-house default name never applies.
+    assert load_job_plan(out).name == "my_saved_set"
