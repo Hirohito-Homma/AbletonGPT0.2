@@ -135,9 +135,13 @@ def _cmd_status(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
     return 0
 
 
-def _print_available_styles() -> None:
-    """Print every registered arrange-run style, one per line for shell-friendly output."""
-    for style in available_styles():
+def _print_available_styles(*, as_json: bool = False) -> None:
+    """Print every registered arrange-run style."""
+    styles = list(available_styles())
+    if as_json:
+        print(json.dumps({"styles": styles}, indent=2, sort_keys=True))
+        return
+    for style in styles:
         print(style)
 
 
@@ -288,7 +292,7 @@ def run_arrangement(
 
 def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
     if args.list_styles:
-        _print_available_styles()
+        _print_available_styles(as_json=args.json)
         return 0
 
     try:
@@ -378,7 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
     arrange_run.add_argument(
         "--json",
         action="store_true",
-        help="Emit machine-readable JSON for --describe-style output.",
+        help="Emit machine-readable JSON for --list-styles or --describe-style output.",
     )
     arrange_run.add_argument(
         "--name",
