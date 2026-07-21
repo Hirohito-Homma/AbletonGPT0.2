@@ -71,6 +71,50 @@ def test_dry_run_builds_plan_without_executing_or_saving(tmp_path: Path, capsys)
     assert "%d step" % len(_DEFAULT_STEP_IDS) in printed
 
 
+def test_dry_run_prints_scene_timeline_with_tempo(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    lines = capsys.readouterr().out.splitlines()
+    # The one-line summary, then one indented timeline line per placed scene.
+    assert lines[0].startswith("dry-run:")
+    scene_lines = [ln for ln in lines if ln.startswith("  ")]
+    assert len(scene_lines) == 7  # deep-house has 7 sections
+    joined = "\n".join(scene_lines)
+    assert "intro" in joined
+    assert "bars 1-8" in joined
+    assert "0:00-0:16 (0:16)" in joined
+    # The final scene ends at the total length (2:06 for 64 bars @122).
+    assert "2:06" in joined
+
+
+def test_dry_run_scene_timeline_without_tempo_falls_back_to_bars(capsys):
+    executor = FakeExecutor()
+
+    # dark-tech-house carries no tempo -> scenes show a bar count, no clock times.
+    rc = main(
+        ["arrange-run", "--style", "dark-tech-house", "--dry-run"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    scene_lines = [
+        ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("  ")
+    ]
+    assert len(scene_lines) == 5
+    joined = "\n".join(scene_lines)
+    assert "intro" in joined
+    assert "8 bar(s)" in joined
+    assert "0:00" not in joined  # no clock times without a tempo
+
+
 # --- dry-run JSON ----------------------------------------------------------------
 
 def test_dry_run_json_prints_parseable_json_without_executing_or_saving(
