@@ -58,6 +58,35 @@ def test_create_simple_output_is_consumable_by_jobs_create(tmp_path: Path):
     assert set(load_step_statuses(plan_out).values())  # readable statuses
 
 
+# --- template / create-simple --json ---------------------------------------------
+
+def test_template_json_reports_written_file(tmp_path: Path, capsys):
+    out = tmp_path / "arr.json"
+
+    rc = main(["template", "--name", "demo", "--out", str(out), "--json"])
+
+    assert rc == 0
+    assert out.exists()  # the file is still written
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "demo"
+    assert payload["path"] == str(out)
+    assert payload["section_count"] == len(_read(out)["sections"])
+    assert isinstance(payload["total_bars"], int)
+
+
+def test_create_simple_json_reports_written_file(tmp_path: Path, capsys):
+    out = tmp_path / "arr.json"
+
+    rc = main(["create-simple", "--name", "song", "--out", str(out), "--json"])
+
+    assert rc == 0
+    assert out.exists()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "song"
+    assert payload["path"] == str(out)
+    assert payload["section_count"] == 5
+
+
 # --- validate --------------------------------------------------------------------
 
 def test_validate_accepts_a_valid_arrangement(tmp_path: Path, capsys):

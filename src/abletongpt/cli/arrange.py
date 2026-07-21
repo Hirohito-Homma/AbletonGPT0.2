@@ -135,25 +135,41 @@ def _overlap_errors(plan: ArrangementPlan) -> list[str]:
 
 # --- subcommands -----------------------------------------------------------------
 
+def _report_written(plan, out_path, *, descriptor: str, as_json: bool) -> None:
+    """Report a freshly written arrangement, as JSON or a human ``wrote ...`` line."""
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "name": plan.name,
+                    "path": str(out_path),
+                    "section_count": len(plan.sections),
+                    "total_bars": plan.total_bars,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    print(
+        "wrote %s '%s' with %d section(s) -> %s"
+        % (descriptor, plan.name, len(plan.sections), out_path)
+    )
+
+
 def _cmd_template(args: argparse.Namespace) -> int:
     # The template is just the simple layout under the user's chosen name -- a valid,
     # ready-to-edit starting point rather than a set of placeholders to fill in.
     plan = simple_arrangement(args.name)
     out_path = write_json_document(arrangement_to_dict(plan), args.out)
-    print(
-        "wrote arrangement template '%s' with %d section(s) -> %s"
-        % (plan.name, len(plan.sections), out_path)
-    )
+    _report_written(plan, out_path, descriptor="arrangement template", as_json=args.json)
     return 0
 
 
 def _cmd_create_simple(args: argparse.Namespace) -> int:
     plan = simple_arrangement(args.name)
     out_path = write_json_document(arrangement_to_dict(plan), args.out)
-    print(
-        "wrote arrangement '%s' with %d section(s) -> %s"
-        % (plan.name, len(plan.sections), out_path)
-    )
+    _report_written(plan, out_path, descriptor="arrangement", as_json=args.json)
     return 0
 
 
@@ -227,6 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     template.add_argument("--name", required=True, help="Name for the arrangement.")
     template.add_argument("--out", required=True, help="Path to write the JSON.")
+    template.add_argument(
+        "--json",
+        action="store_true",
+        help="Report the written file as JSON (name, path, counts) instead of text.",
+    )
     template.set_defaults(func=_cmd_template)
 
     simple = sub.add_parser(
@@ -235,6 +256,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     simple.add_argument("--name", required=True, help="Name for the arrangement.")
     simple.add_argument("--out", required=True, help="Path to write the JSON.")
+    simple.add_argument(
+        "--json",
+        action="store_true",
+        help="Report the written file as JSON (name, path, counts) instead of text.",
+    )
     simple.set_defaults(func=_cmd_create_simple)
 
     validate = sub.add_parser(
