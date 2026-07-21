@@ -180,6 +180,23 @@ def _duration_seconds(tempo: float | None, total_bars: int) -> float | None:
     return round(total_bars * _BEATS_PER_BAR * 60.0 / tempo, 3)
 
 
+def _duration_label(seconds: float | None) -> str | None:
+    """Format ``seconds`` as a clock string (``M:SS``, or ``H:MM:SS`` past an hour).
+
+    Mirrors :func:`_duration_seconds`: ``None`` in -> ``None`` out. Seconds are rounded to
+    the nearest whole second, so this reads as a human-friendly companion to the exact
+    ``duration_seconds`` value rather than a second source of truth.
+    """
+    if seconds is None:
+        return None
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return "%d:%02d:%02d" % (hours, minutes, secs)
+    return "%d:%02d" % (minutes, secs)
+
+
 def _section_summaries(arrangement) -> list[dict[str, object]]:
     """Machine-friendly per-section dicts for an arrangement (shared JSON shape)."""
     return [
@@ -204,6 +221,7 @@ def _style_description(style: str) -> dict[str, object]:
     sections = _section_summaries(arrangement)
     tempo = _tempo_of(plan)
     total_bars = _total_bars_of(plan)
+    duration = _duration_seconds(tempo, total_bars)
     return {
         "style": style,
         "name": plan.name,
@@ -211,7 +229,8 @@ def _style_description(style: str) -> dict[str, object]:
         "section_count": len(sections),
         "tempo": tempo,
         "total_bars": total_bars,
-        "duration_seconds": _duration_seconds(tempo, total_bars),
+        "duration_seconds": duration,
+        "duration_formatted": _duration_label(duration),
         "sections": sections,
     }
 
@@ -314,6 +333,7 @@ def _dry_run_description(
     sections = _section_summaries(arrangement)
     plan_tempo = _tempo_of(plan)
     total_bars = _total_bars_of(plan)
+    duration = _duration_seconds(plan_tempo, total_bars)
     return {
         "dry_run": True,
         "style": style,
@@ -322,7 +342,8 @@ def _dry_run_description(
         "section_count": len(sections),
         "tempo": plan_tempo,
         "total_bars": total_bars,
-        "duration_seconds": _duration_seconds(plan_tempo, total_bars),
+        "duration_seconds": duration,
+        "duration_formatted": _duration_label(duration),
         "sections": sections,
         "steps": _step_summaries(plan),
     }

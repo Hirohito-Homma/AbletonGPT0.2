@@ -188,6 +188,46 @@ def test_dry_run_json_duration_tracks_tempo_and_bars_overrides(capsys):
     assert payload["duration_seconds"] == 60.0
 
 
+def test_dry_run_json_reports_duration_formatted(capsys):
+    executor = FakeExecutor()
+
+    # 32 bars * 4 beats at 128 BPM = 60 seconds -> "1:00".
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "deep-house",
+            "--tempo",
+            "128",
+            "--bars",
+            "32",
+            "--dry-run-json",
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["duration_seconds"] == 60.0
+    assert payload["duration_formatted"] == "1:00"
+
+
+def test_dry_run_json_duration_formatted_is_null_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "dark-tech-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["duration_seconds"] is None
+    assert payload["duration_formatted"] is None
+
+
 def test_dry_run_json_duration_is_null_without_tempo(capsys):
     executor = FakeExecutor()
 
@@ -1255,3 +1295,39 @@ def test_arrange_run_describe_all_styles_json_includes_duration_seconds(capsys):
         assert "duration_seconds" in entry
     assert by_style["dark-tech-house"]["duration_seconds"] is None
     assert by_style["deep-house"]["duration_seconds"] == round(64 * 4 * 60 / 122, 3)
+
+
+def test_arrange_run_describe_style_json_includes_duration_formatted(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-style", "deep-house", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # deep-house: 125.902s rounds to 126s -> "2:06".
+    assert payload["duration_seconds"] == round(64 * 4 * 60 / 122, 3)
+    assert payload["duration_formatted"] == "2:06"
+
+
+def test_arrange_run_describe_all_styles_json_includes_duration_formatted(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--describe-all-styles", "--json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+
+    by_style = {entry["style"]: entry for entry in payload["styles"]}
+    for entry in payload["styles"]:
+        assert "duration_formatted" in entry
+    # Null tempo -> null label; a tempo-bearing style formats as a clock string.
+    assert by_style["dark-tech-house"]["duration_formatted"] is None
+    assert by_style["deep-house"]["duration_formatted"] == "2:06"
