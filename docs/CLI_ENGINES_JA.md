@@ -1,10 +1,12 @@
-# エンジンCLIガイド（instruments / loudness / vocal）
+# エンジンCLIガイド（instruments / loudness / vocal / compose / contextual）
 
-AbletonGPTの純ロジックエンジンは、MCPサーバーを介さずコマンドラインからも直接使えます。いずれも**決定論的**で、**Ableton Liveへ接続しません**（loudnessはファイルを読むだけ、他はファイルI/Oもなし）。すべて `--json` で機械可読出力に切り替えられます。
+AbletonGPTの純ロジックエンジンは、MCPサーバーを介さずコマンドラインからも直接使えます。いずれも**決定論的**で、**Ableton Liveへ接続しません**（loudness と contextual はファイルを読むだけ、他はファイルI/Oもなし）。すべて `--json` で機械可読出力に切り替えられます。
 
 - `python -m abletongpt.cli.instruments` — ジャンル/ムードから純正音源の選定プランを出力
 - `python -m abletongpt.cli.loudness` — WAV/AIFF のLUFS等をオフライン解析（読み取り専用）
 - `python -m abletongpt.cli.vocal` — 歌詞から Vocal Guide メロディの計画を出力
+- `python -m abletongpt.cli.compose` — 設定からマルチトラックのソングスケッチを生成
+- `python -m abletongpt.cli.contextual` — 既存MIDIクリップを解析し、補完トラックを計画
 
 アレンジ計画（`arrange` / `jobs` / `arrange-run`）については [アレンジCLIガイド](CLI_ARRANGE_JA.md) を参照してください。
 
@@ -110,8 +112,96 @@ enum系は argparse が検証（exit 2）。空歌詞や tempo/density の範囲
 
 ---
 
+## 4. `compose` — マルチトラックのソングスケッチ
+
+genre/mood/key/mode/tempo/bars から、chords / bass / melody / drums の4トラックを決定論的に生成します。`vocal` がメロディだけを扱うのに対し、こちらは伴奏を含む完全なスケッチです。
+
+```bash
+python -m abletongpt.cli.compose --title Demo --genre pop --mood bright \
+    --key C --mode major --tempo 120 --bars 8
+python -m abletongpt.cli.compose ... --complexity seventh --seed 7 --json
+```
+
+出力例:
+
+```text
+$ python -m abletongpt.cli.compose --title Demo --genre pop --mood bright --key C --mode major --tempo 120 --bars 8 --complexity seventh --seed 7
+title: Demo  key: C major  tempo: 120  bars: 8  seed: 7
+progression: C G A F C G A F   (pop / bright, seventh)
+tracks:
+  chords   32 notes
+  bass     32 notes
+  melody   49 notes
+  drums    96 notes
+```
+
+| 引数 | 必須 | 説明 |
+| --- | --- | --- |
+| `--title` | ○ | 曲タイトル |
+| `--genre` / `--mood` | ○ | instruments と同じ候補 |
+| `--key` | ○ | `A A# Ab B Bb C C# D D# Db E Eb F F# G G# Gb` |
+| `--mode` | ○ | `major, minor` |
+| `--tempo` | ○ | BPM（40〜240） |
+| `--bars` | ○ | `4, 8, 16, 32` |
+| `--complexity` | | `triad, seventh, ninth`（既定 `triad`） |
+| `--density` | | メロディ密度 0.05〜1.0（既定 0.75） |
+| `--swing` / `--humanize` | | 0.0〜1.0（既定 0.0） |
+| `--seed` | | 決定論シード（既定 0）。同じseedなら同じ結果 |
+| `--json` | | 完全プラン（tracks / professional_settings / chord_roots など）をJSONで出力 |
+
+enum系は argparse が検証（exit 2）。tempo/density/swing/humanize の範囲外はエンジンが検出し、明確なメッセージで exit 2 になります。
+
+---
+
+## 5. `contextual` — 既存クリップの解析と補完トラック計画
+
+`--clip` に既存MIDIクリップのJSONファイル（最低限 `length_beats` と、`{pitch, start_time, duration}` を要素とする `notes` 配列。Liveの `get_midi_clip_notes` と同形式）を渡します。2つのサブコマンドがあります。
+
+### analyze — 音楽的コンテキストの推定
+
+```bash
+python -m abletongpt.cli.contextual analyze --clip clip.json
+python -m abletongpt.cli.contextual analyze --clip clip.json --source-role chords --json
+```
+
+```text
+source: Chords  role: chords (auto: chords)  length: 16 beats
+key: C major  (confidence 0.04, runner-up A minor)
+range: 60-69 (center 64.5)   rhythm: 1.5 notes/bar, grid 2 beats
+```
+
+`--source-role`（`auto` 既定、または `chords/bass/melody/pad/drums`）で役割を明示できます。ドラムはキー判定不可のため `key: n/a` になります。
+
+### plan — 補完トラックの設計
+
+```bash
+python -m abletongpt.cli.contextual plan --clip clip.json --target-role bass --seed 3 --title Bass
+```
+
+```text
+target: bass 'Bass'  16 beats, 16 notes
+key: C major   instrument: Drift
+strategy: 小節ごとの推定ルートを低音域へ配置し、ジャンルのベース密度を反映します。
+next: 内容を確認後、create_complementary_midi_trackで新規MIDIトラックへ作成してください。
+```
+
+| 引数 | 必須 | 説明 |
+| --- | --- | --- |
+| `--clip` | ○ | 解析する MIDIクリップ JSON ファイル |
+| `--target-role` | ○ | 生成する役割: `chords, bass, melody, countermelody, pad, drums` |
+| `--source-role` | | 元クリップの役割（`auto` 既定 ほか） |
+| `--genre` / `--mood` | | 既定 `pop` / `bright` |
+| `--key` / `--mode` | | キー/モードの上書き（既定はクリップから推定） |
+| `--seed` | | 決定論シード（既定 0） |
+| `--title` | | 生成トラック名 |
+| `--json` | | 完全結果（target_track / generation / instrument_selection / next_step など）をJSONで出力 |
+
+両サブコマンドとも**読み取り専用**（クリップを書き換えません）。ファイル無し・不正JSON・ノート無し等は exit 2。実際のトラック作成は確認後の別ツール（`create_complementary_midi_track`）で行います。
+
+---
+
 ## 共通仕様
 
 - すべてのコマンドが `--json` を受け付け、標準出力に整形済みJSONを返します（日本語ラベルは読みやすさのため非エスケープ）。
-- どれも **Ableton Live へ接続しません**。loudnessはファイルを読むだけ、instruments/vocalはファイルI/Oもありません。
+- どれも **Ableton Live へ接続しません**。loudness と contextual はファイルを読むだけ、instruments / vocal / compose はファイルI/Oもありません。
 - 不正な引数値は終了コード **2** で報告します。
