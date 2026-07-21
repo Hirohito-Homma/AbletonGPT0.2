@@ -147,6 +147,63 @@ def test_dry_run_json_reflects_tempo_bars_name_overrides(capsys):
     assert payload["total_bars"] == 80
 
 
+def test_dry_run_json_reports_duration_seconds(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        ["arrange-run", "--style", "deep-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # deep-house: 64 bars * 4 beats at 122 BPM -> 256 * 60 / 122 seconds.
+    assert payload["tempo"] == 122.0
+    assert payload["total_bars"] == 64
+    assert payload["duration_seconds"] == round(64 * 4 * 60 / 122, 3)
+
+
+def test_dry_run_json_duration_tracks_tempo_and_bars_overrides(capsys):
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "arrange-run",
+            "--style",
+            "deep-house",
+            "--tempo",
+            "128",
+            "--bars",
+            "32",
+            "--dry-run-json",
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    # 32 bars * 4 beats at 128 BPM = 60 seconds exactly.
+    assert payload["duration_seconds"] == 60.0
+
+
+def test_dry_run_json_duration_is_null_without_tempo(capsys):
+    executor = FakeExecutor()
+
+    # dark-tech-house carries no tempo, so duration is undefined (null), not zero.
+    rc = main(
+        ["arrange-run", "--style", "dark-tech-house", "--dry-run-json"],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tempo"] is None
+    assert payload["duration_seconds"] is None
+
+
 def test_dry_run_json_unknown_style_fails_clearly(capsys):
     executor = FakeExecutor()
 
