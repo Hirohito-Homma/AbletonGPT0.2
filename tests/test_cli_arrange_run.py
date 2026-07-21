@@ -1007,10 +1007,13 @@ def test_arrange_run_describe_style_json_includes_sections(capsys):
         "source_scene",
         "start_bar",
         "length_bars",
+        "end_bar",
         "transition",
         "tags",
     }
     assert sum(section["length_bars"] for section in sections) == payload["total_bars"]
+    for section in sections:
+        assert section["end_bar"] == section["start_bar"] + section["length_bars"]
 
 
 def test_arrange_run_describe_all_styles_json_includes_sections(capsys):
@@ -1033,3 +1036,5 @@ def test_arrange_run_describe_all_styles_json_includes_sections(capsys):
         assert sum(section["length_bars"] for section in sections) == by_style[style][
             "total_bars"
         ]
+        for section in sections:
+            assert section["end_bar"] == section["start_bar"] + section["length_bars"]

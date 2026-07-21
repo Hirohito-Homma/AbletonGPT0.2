@@ -165,6 +165,7 @@ def _style_description(style: str) -> dict[str, object]:
             "source_scene": section.source_scene,
             "start_bar": section.start_bar,
             "length_bars": section.length_bars,
+            "end_bar": section.start_bar + section.length_bars,
             "transition": section.transition,
             "tags": list(section.tags),
         }
