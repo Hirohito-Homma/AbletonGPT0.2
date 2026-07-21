@@ -24,7 +24,6 @@ from typing import Callable
 
 from .serialization import arrangement_from_dict, read_json_document
 from ..arrange.presets import (
-    DEFAULT_ARRANGEMENT_NAME,
     DEFAULT_STYLE,
     UnknownStyleError,
     arrangement_for_style,
@@ -163,7 +162,7 @@ def _plan_overview(plan: JobPlan) -> str:
 def _prepare_job_plan(
     *,
     style: str,
-    name: str,
+    name: str | None,
     job_path: str | None,
     resume: bool,
     tempo: float | None,
@@ -175,7 +174,8 @@ def _prepare_job_plan(
     reload it plus its progress so completed steps are skipped -- the on-disk plan wins,
     so ``--style``/``--tempo``/``--bars``/``--name`` are deliberately ignored and never
     regenerate it. Otherwise build a fresh arrangement for ``style`` (honoring
-    ``name``/``tempo``/``bars``) -> job plan, with empty prior progress. Falling back to a
+    ``name``/``tempo``/``bars``) -> job plan, with empty prior progress. A ``name`` of
+    ``None`` (``--name`` omitted) takes the style's own default name. Falling back to a
     fresh build (rather than erroring) keeps ``--resume`` safe to pass on a first run.
     Raises :class:`UnknownStyleError` when a fresh build is asked for an unknown style.
     """
@@ -194,7 +194,7 @@ def run_arrangement(
     factory: ExecutorFactory,
     *,
     style: str = DEFAULT_STYLE,
-    name: str = DEFAULT_ARRANGEMENT_NAME,
+    name: str | None = None,
     job_path: str | None = None,
     save: bool = True,
     dry_run: bool = False,
@@ -206,11 +206,11 @@ def run_arrangement(
 
     One-shot glue over the existing engines: ``arrangement_for_style`` -> ``build_job_plan``
     -> optional ``save_job_plan`` -> ``JobRunner`` + the injected executor. ``style`` picks
-    the genre preset; ``tempo`` (BPM) and ``bars`` (total length) shape it. All three are
-    ignored on the ``resume`` path, where the saved plan takes precedence. ``dry_run``
-    prints the plan summary and returns without touching the executor or disk. Returns a
-    process exit code (0 ok, 1 if any step failed). Raises :class:`UnknownStyleError` for
-    an unknown style on a fresh build.
+    the genre preset; ``tempo`` (BPM) and ``bars`` (total length) shape it. ``name`` of
+    ``None`` uses the style's own default name. All four are ignored on the ``resume`` path,
+    where the saved plan takes precedence. ``dry_run`` prints the plan summary and returns
+    without touching the executor or disk. Returns a process exit code (0 ok, 1 if any step
+    failed). Raises :class:`UnknownStyleError` for an unknown style on a fresh build.
     """
     plan, prior, completed = _prepare_job_plan(
         style=style,
@@ -311,8 +311,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     arrange_run.add_argument(
         "--name",
-        default=DEFAULT_ARRANGEMENT_NAME,
-        help="Name for the generated arrangement (default: %(default)s).",
+        default=None,
+        help="Name for the generated arrangement (default: the style's own name, "
+        "e.g. dark_tech_house / deep_house). Ignored with --resume.",
     )
     arrange_run.add_argument(
         "--tempo",

@@ -10,6 +10,7 @@ from .presets import (
     arrangement_for_style,
     available_styles,
     deep_house_arrangement,
+    default_name_for_style,
     simple_arrangement,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "arrangement_for_style",
     "available_styles",
     "deep_house_arrangement",
+    "default_name_for_style",
     "simple_arrangement",
 ]
