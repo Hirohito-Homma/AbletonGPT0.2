@@ -98,6 +98,19 @@ def _cmd_create(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
     arrangement = arrangement_from_dict(document)
     job_plan = build_job_plan(arrangement)
     out_path = save_job_plan(job_plan, args.out)  # creates parent dirs
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "name": job_plan.name,
+                    "path": str(out_path),
+                    "step_count": len(job_plan.steps),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
     print(
         "created job plan '%s' with %d step(s) -> %s"
         % (job_plan.name, len(job_plan.steps), out_path)
@@ -594,6 +607,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument(
         "--out", required=True, help="Path to write the resulting job plan JSON."
+    )
+    create.add_argument(
+        "--json",
+        action="store_true",
+        help="Report the created plan as JSON (name, path, step_count) instead of text.",
     )
     create.set_defaults(func=_cmd_create)
 

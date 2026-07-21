@@ -92,6 +92,20 @@ def test_create_builds_job_plan_json_from_arrangement(tmp_path: Path, capsys):
     assert "2 step" in out_text
 
 
+def test_create_json_reports_written_plan(tmp_path: Path, capsys):
+    arrangement = _write_arrangement(tmp_path / "arr.json")
+    out = tmp_path / "plan.json"
+
+    rc = main(["create", "--arrangement", str(arrangement), "--out", str(out), "--json"])
+
+    assert rc == 0
+    assert out.exists()  # the plan file is still written
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "test_song"
+    assert payload["path"] == str(out)
+    assert payload["step_count"] == len(load_job_plan(out).steps) == 2
+
+
 def test_create_makes_missing_parent_directories(tmp_path: Path):
     arrangement = _write_arrangement(tmp_path / "arr.json")
     out = tmp_path / "nested" / "deep" / "plan.json"
