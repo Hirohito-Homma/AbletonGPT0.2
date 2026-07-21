@@ -145,20 +145,27 @@ def _print_available_styles(*, as_json: bool = False) -> None:
         print(style)
 
 
-def _style_description(style: str) -> dict[str, object]:
-    """Return a compact, machine-friendly summary for one registered style."""
-    arrangement = arrangement_for_style(style, None)
-    plan = build_job_plan(arrangement)
+def _tempo_of(plan: JobPlan) -> float | None:
+    """The BPM the plan's leading set_tempo step carries, or ``None`` if it has none."""
     tempo = next(
         (step.params.get("bpm") for step in plan.steps if step.command == "set_tempo"),
         None,
     )
-    total_bars = sum(
+    return float(tempo) if tempo is not None else None
+
+
+def _total_bars_of(plan: JobPlan) -> int:
+    """Sum of every placed scene's length -- the plan's total arrangement length."""
+    return sum(
         int(step.params.get("length_bars", 0))
         for step in plan.steps
         if step.command == "place_scene"
     )
-    sections = [
+
+
+def _section_summaries(arrangement) -> list[dict[str, object]]:
+    """Machine-friendly per-section dicts for an arrangement (shared JSON shape)."""
+    return [
         {
             "section_id": section.section_id,
             "name": section.name,
@@ -171,13 +178,20 @@ def _style_description(style: str) -> dict[str, object]:
         }
         for section in arrangement.sections
     ]
+
+
+def _style_description(style: str) -> dict[str, object]:
+    """Return a compact, machine-friendly summary for one registered style."""
+    arrangement = arrangement_for_style(style, None)
+    plan = build_job_plan(arrangement)
+    sections = _section_summaries(arrangement)
     return {
         "style": style,
         "name": plan.name,
         "step_count": len(plan.steps),
         "section_count": len(sections),
-        "tempo": float(tempo) if tempo is not None else None,
-        "total_bars": total_bars,
+        "tempo": _tempo_of(plan),
+        "total_bars": _total_bars_of(plan),
         "sections": sections,
     }
 
@@ -247,6 +261,60 @@ def _plan_overview(plan: JobPlan) -> str:
     if total_bars:
         parts.append("%d bar(s)" % total_bars)
     return ", ".join(parts)
+
+
+def _step_summaries(plan: JobPlan) -> list[dict[str, object]]:
+    """Machine-friendly per-step dicts for a job plan (no status: nothing has run)."""
+    return [
+        {
+            "step_id": step.step_id,
+            "command": step.command,
+            "params": dict(step.params),
+        }
+        for step in plan.steps
+    ]
+
+
+def _dry_run_description(
+    *,
+    style: str,
+    name: str | None,
+    tempo: float | None,
+    bars: int | None,
+) -> dict[str, object]:
+    """Build the arrangement + job plan for ``style`` and describe them, without running.
+
+    Honors the same musical overrides as a real ``arrange-run`` (``name``/``tempo``/
+    ``bars``) so the JSON reflects exactly what *would* be executed. Purely constructs
+    plan objects -- it never touches an executor, the bridge, or disk. Raises
+    :class:`UnknownStyleError` for an unknown style.
+    """
+    arrangement = arrangement_for_style(style, name, tempo=tempo, total_bars=bars)
+    plan = build_job_plan(arrangement)
+    sections = _section_summaries(arrangement)
+    return {
+        "dry_run": True,
+        "style": style,
+        "name": plan.name,
+        "step_count": len(plan.steps),
+        "section_count": len(sections),
+        "tempo": _tempo_of(plan),
+        "total_bars": _total_bars_of(plan),
+        "sections": sections,
+        "steps": _step_summaries(plan),
+    }
+
+
+def _print_dry_run_json(
+    *,
+    style: str,
+    name: str | None,
+    tempo: float | None,
+    bars: int | None,
+) -> None:
+    """Print the dry-run description as parse-able JSON on stdout."""
+    description = _dry_run_description(style=style, name=name, tempo=tempo, bars=bars)
+    print(json.dumps(description, indent=2, sort_keys=True))
 
 
 def _prepare_job_plan(
@@ -341,6 +409,16 @@ def _cmd_arrange_run(args: argparse.Namespace, factory: ExecutorFactory) -> int:
 
         if args.describe_style is not None:
             _print_style_description(args.describe_style, as_json=args.json)
+            return 0
+
+        if args.dry_run_json:
+            # Emit the plan that *would* run as JSON and stop -- no executor, no save.
+            _print_dry_run_json(
+                style=args.style,
+                name=args.name,
+                tempo=args.tempo,
+                bars=args.bars,
+            )
             return 0
 
         # Save only when a destination exists and the user did not opt out; there is nothing
@@ -463,6 +541,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Show the job plan that would run without executing or saving anything.",
+    )
+    arrange_run.add_argument(
+        "--dry-run-json",
+        action="store_true",
+        help="Print the arrangement/job plan that would run as JSON, then exit "
+        "without executing or saving anything.",
     )
     arrange_run.add_argument(
         "--resume",
