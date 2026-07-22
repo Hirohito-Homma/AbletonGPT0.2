@@ -93,6 +93,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "collision-safe Session-to-Arrangement clip and scene copy",
             "read-only Session and Arrangement audio source-path inspection",
             "non-destructive normalized mix-state snapshots and snapshot diffing",
+            "read-only Live browser navigation for presets and kits (never loads or inserts)",
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
@@ -747,6 +748,48 @@ def get_track_devices(track_index: int) -> dict[str, Any]:
     if track_index < 0:
         raise ValueError("track_index must be non-negative")
     return bridge.call("get_track_devices", track_index=track_index)
+
+
+#: Top-level Live browser roots that :func:`browse_device_presets` may enumerate. Each maps
+#: to a ``BrowserItem`` on ``Application.browser``. Browsing is strictly read-only.
+_BROWSER_CATEGORIES = (
+    "instruments",
+    "sounds",
+    "drums",
+    "audio_effects",
+    "midi_effects",
+    "samples",
+    "plugins",
+    "max_for_live",
+    "packs",
+    "user_library",
+)
+
+
+@mcp.tool()
+def browse_device_presets(
+    category: str,
+    path: list[str] | None = None,
+    max_items: int = 200,
+) -> dict[str, Any]:
+    """Liveブラウザの内容を読み取り専用で列挙する。categoryはinstruments/sounds/drums/
+    audio_effects/midi_effects/samples/plugins/max_for_live/packs/user_libraryのいずれか。
+    pathでフォルダを1階層ずつ辿る。各項目はname/is_folder/is_loadable/is_device/uri/sourceを返す。
+    プリセットのロードや挿入は一切行わない。"""
+    if category not in _BROWSER_CATEGORIES:
+        raise ValueError("category must be one of: %s" % ", ".join(_BROWSER_CATEGORIES))
+    if path is not None and (
+        not isinstance(path, list) or any(not isinstance(segment, str) for segment in path)
+    ):
+        raise ValueError("path must be a list of folder-name strings")
+    if not 1 <= max_items <= 1000:
+        raise ValueError("max_items must be between 1 and 1000")
+    return bridge.call(
+        "browse_presets",
+        category=category,
+        path=list(path or []),
+        max_items=max_items,
+    )
 
 
 @mcp.tool()

@@ -159,6 +159,12 @@ class AbletonGPTControlSurface(ControlSurface):
                 "master": self._mix_state(-1, song.master_track),
                 "meter_note": "output_meter_level is a momentary/hold Live meter, not LUFS",
             }
+        if command == "browse_presets":
+            return self._browse_presets(
+                params["category"],
+                params.get("path", []),
+                int(params.get("max_items", 200)),
+            )
         if command == "create_track":
             track_type = params["track_type"]
             index = int(params.get("index", -1))
@@ -905,4 +911,64 @@ class AbletonGPTControlSurface(ControlSurface):
                 {"index": send_index, "value": float(send.value)}
                 for send_index, send in enumerate(mixer.sends)
             ],
+        }
+
+    #: Top-level Live browser roots we allow enumerating. Each name is a BrowserItem
+    #: attribute on ``Application.browser``. Read-only browsing only -- never loads.
+    BROWSER_CATEGORIES = (
+        "instruments",
+        "sounds",
+        "drums",
+        "audio_effects",
+        "midi_effects",
+        "samples",
+        "plugins",
+        "max_for_live",
+        "packs",
+        "user_library",
+    )
+
+    def _browse_presets(self, category, path, max_items):
+        if category not in self.BROWSER_CATEGORIES:
+            raise ValueError("unknown browser category: %s" % category)
+        if max_items < 1 or max_items > 1000:
+            raise ValueError("max_items must be between 1 and 1000")
+        browser = self.application().browser
+        node = getattr(browser, category, None)
+        if node is None:
+            raise ValueError("this Live version has no '%s' browser category" % category)
+
+        for segment in path:
+            match = None
+            for child in node.children:
+                if child.name == segment and child.is_folder:
+                    match = child
+                    break
+            if match is None:
+                raise ValueError("browser folder not found: %s" % segment)
+            node = match
+
+        items = []
+        truncated = False
+        for child in node.children:
+            if len(items) >= max_items:
+                truncated = True
+                break
+            items.append(
+                {
+                    "name": child.name,
+                    "is_folder": bool(child.is_folder),
+                    "is_loadable": bool(getattr(child, "is_loadable", False)),
+                    "is_device": bool(getattr(child, "is_device", False)),
+                    "uri": getattr(child, "uri", None),
+                    "source": getattr(child, "source", None),
+                }
+            )
+        return {
+            "category": category,
+            "path": list(path),
+            "items": items,
+            "item_count": len(items),
+            "truncated": truncated,
+            "read_only": True,
         }
