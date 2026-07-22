@@ -43,12 +43,28 @@ _CHORDS = {
 }
 
 
+_ONSETS = {
+    "onset_times": [0.0, 0.5, 1.0],
+    "onsets": [
+        {"time_seconds": 0.0, "strength": 1.0},
+        {"time_seconds": 0.5, "strength": 0.6},
+        {"time_seconds": 1.0, "strength": 0.8},
+    ],
+}
+_BEATS = {
+    "beat_times": [0.0, 0.5],
+    "beats": [{"time_seconds": 0.0, "strength": 0.9}, {"time_seconds": 0.5, "strength": 0.7}],
+}
+
+
 @pytest.fixture
 def fake_bridge(monkeypatch):
     bridge = FakeBridge()
     monkeypatch.setattr(server, "bridge", bridge)
     monkeypatch.setattr(server, "extract_melody", lambda *args, **kwargs: dict(_MELODY))
     monkeypatch.setattr(server, "estimate_chords", lambda *args, **kwargs: dict(_CHORDS))
+    monkeypatch.setattr(server, "detect_onsets", lambda *args, **kwargs: dict(_ONSETS))
+    monkeypatch.setattr(server, "track_beats", lambda *args, **kwargs: dict(_BEATS))
     return bridge
 
 
@@ -97,3 +113,28 @@ def test_create_chords_issues_one_create_midi_clip(fake_bridge):
     assert len(params["notes"]) == 6
     assert result["source"] == "audio_chords"
     assert result["chord_count"] == 2
+
+
+def test_plan_rhythm_onsets_is_read_only(fake_bridge):
+    plan = server.plan_midi_from_audio_rhythm("loop.wav", tempo=120.0, source="onsets", pitch=38)
+
+    assert plan["note_count"] == 3
+    assert all(note["pitch"] == 38 for note in plan["notes"])
+    assert fake_bridge.calls == []
+
+
+def test_create_rhythm_beats_issues_one_mutation(fake_bridge):
+    result = server.create_midi_from_audio_rhythm(
+        "loop.wav", track_index=0, clip_index=0, tempo=120.0, source="beats"
+    )
+
+    assert [command for command, _ in fake_bridge.calls] == ["create_midi_clip"]
+    assert len(fake_bridge.calls[0][1]["notes"]) == 2
+    assert result["source"] == "audio_rhythm"
+    assert result["rhythm_source"] == "beats"
+
+
+def test_rhythm_rejects_unknown_source(fake_bridge):
+    with pytest.raises(ValueError):
+        server.plan_midi_from_audio_rhythm("loop.wav", tempo=120.0, source="claps")
+    assert fake_bridge.calls == []

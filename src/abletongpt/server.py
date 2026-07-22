@@ -27,7 +27,11 @@ from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .snapshots import build_snapshot, diff_snapshots
-from .transcription import build_midi_from_chords, build_midi_from_melody
+from .transcription import (
+    build_midi_from_chords,
+    build_midi_from_melody,
+    build_midi_from_times,
+)
 from .vocal import build_vocal_plan
 
 
@@ -122,6 +126,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
             "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
             "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
+            "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -524,6 +529,65 @@ def create_midi_from_audio_chords(
     result["source"] = "audio_chords"
     result["note_count"] = plan["note_count"]
     result["chord_count"] = plan["chord_count"]
+    return result
+
+
+def _audio_rhythm_plan(
+    file_path: str, source: str, tempo: float, pitch: int, quantize: float
+) -> dict[str, Any]:
+    """Detect onsets or beats and turn their times into a trigger-note MIDI plan."""
+    if source == "onsets":
+        result = detect_onsets(file_path)
+        times = result["onset_times"]
+        strengths = [onset["strength"] for onset in result["onsets"]]
+    elif source == "beats":
+        result = track_beats(file_path)
+        times = result["beat_times"]
+        strengths = [beat["strength"] for beat in result["beats"]]
+    else:
+        raise ValueError("source must be 'onsets' or 'beats'")
+    return build_midi_from_times(times, tempo, pitch=pitch, quantize=quantize, strengths=strengths)
+
+
+@mcp.tool()
+def plan_midi_from_audio_rhythm(
+    file_path: str,
+    tempo: float,
+    source: str = "onsets",
+    pitch: int = 36,
+    quantize: float = 0.0,
+) -> dict[str, Any]:
+    """WAV/AIFFのリズム(source='onsets'または'beats')を検出し、各時刻を単一pitchのトリガーノート(拍単位)へ
+    変換する計画を返す。強度に応じてベロシティが変化。quantizeは拍グリッド。読み取り専用。create前のレビュー用。NumPy必須。"""
+    return _audio_rhythm_plan(file_path, source, tempo, pitch, quantize)
+
+
+@mcp.tool()
+def create_midi_from_audio_rhythm(
+    file_path: str,
+    track_index: int,
+    clip_index: int,
+    tempo: float,
+    source: str = "onsets",
+    pitch: int = 36,
+    name: str = "Audio Rhythm",
+    quantize: float = 0.0,
+) -> dict[str, Any]:
+    """WAV/AIFFのリズム(onsets/beats)を検出し、空のSessionスロットへトリガーノートの編集可能なMIDIクリップとして
+    書き出す。既存クリップは上書きしない。まずplan_midi_from_audio_rhythmで内容を確認すること。NumPy必須。"""
+    plan = _audio_rhythm_plan(file_path, source, tempo, pitch, quantize)
+    _validate_midi_clip(track_index, clip_index, plan["length_beats"], plan["notes"])
+    result = bridge.call(
+        "create_midi_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        name=name[:200],
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    result["source"] = "audio_rhythm"
+    result["rhythm_source"] = source
+    result["note_count"] = plan["note_count"]
     return result
 
 

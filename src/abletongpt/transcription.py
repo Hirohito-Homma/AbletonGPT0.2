@@ -75,6 +75,69 @@ def build_midi_from_melody(
     }
 
 
+def build_midi_from_times(
+    times: list[float],
+    tempo: float,
+    *,
+    pitch: int = 36,
+    velocity: int = 100,
+    duration_beats: float = 0.25,
+    quantize: float = 0.0,
+    strengths: list[float] | None = None,
+) -> dict[str, Any]:
+    """Convert a list of event times (seconds) + tempo into a ``create_midi_clip`` plan.
+
+    Each time becomes one short note at a single ``pitch`` -- a trigger for detected onsets
+    or beats. When ``strengths`` (0-1 per time) is given, velocity scales from 40% to 100% of
+    ``velocity`` for accents. ``quantize`` snaps note starts to a beat grid; notes that then
+    collapse onto the same start are merged, keeping the louder one.
+    """
+    if tempo <= 0.0:
+        raise ValueError("tempo must be positive")
+    if not 0 <= pitch <= 127:
+        raise ValueError("pitch must be between 0 and 127")
+    if not 1 <= velocity <= 127:
+        raise ValueError("velocity must be between 1 and 127")
+    if not 0.0 < duration_beats <= 16.0:
+        raise ValueError("duration_beats must be between 0 and 16")
+    if not 0.0 <= quantize <= 16.0:
+        raise ValueError("quantize must be between 0 and 16 beats")
+
+    beats_per_second = tempo / 60.0
+    by_start: dict[float, dict[str, Any]] = {}
+    for index, time in enumerate(times):
+        start = float(time) * beats_per_second
+        if quantize > 0.0:
+            start = round(start / quantize) * quantize
+        start = round(start, 6)
+        note_velocity = velocity
+        if strengths is not None and index < len(strengths):
+            strength = max(0.0, min(1.0, float(strengths[index])))
+            note_velocity = max(1, min(127, int(round((0.4 + 0.6 * strength) * velocity))))
+        existing = by_start.get(start)
+        if existing is None or note_velocity > existing["velocity"]:
+            by_start[start] = {
+                "pitch": pitch,
+                "start_time": start,
+                "duration": round(duration_beats, 6),
+                "velocity": note_velocity,
+            }
+
+    notes = [by_start[start] for start in sorted(by_start)]
+    last_end = max((note["start_time"] + note["duration"] for note in notes), default=0.0)
+    length_beats = float(max(1, math.ceil(last_end)))
+
+    return {
+        "source": "times",
+        "tempo": tempo,
+        "quantize": quantize,
+        "pitch": pitch,
+        "length_beats": length_beats,
+        "notes": notes,
+        "note_count": len(notes),
+    }
+
+
 def _parse_chord(label: str):
     """Parse a chord label like ``C``/``Cm``/``F#`` into ``(root_pc, quality)`` or ``None``.
 
