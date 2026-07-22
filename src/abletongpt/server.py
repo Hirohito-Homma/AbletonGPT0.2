@@ -12,6 +12,7 @@ from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
 from .audio import (
+    analyze_stereo_field,
     detect_onsets,
     estimate_chords,
     estimate_key,
@@ -128,13 +129,14 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
             "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
             "offline WAV/AIFF tonal band-balance (level-independent) (requires the audio extra: NumPy)",
+            "offline WAV/AIFF stereo-field analysis (width, L/R phase correlation, balance) (requires the audio extra: NumPy)",
             "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
             "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
             "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
-            "offline mix-vs-reference comparison (loudness + tone + per-band balance) with plain-language guidance (requires the audio extra: NumPy)",
+            "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with plain-language guidance (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -453,10 +455,18 @@ def analyze_audio_spectral_bands(file_path: str) -> dict[str, Any]:
     return extract_spectral_bands(file_path)
 
 
+@mcp.tool()
+def analyze_audio_stereo(file_path: str) -> dict[str, Any]:
+    """WAV/AIFFのステレオ像(幅=Side比率、L/R位相相関=モノ互換性、左右バランス)をオフライン測定する。
+    correlationは+1(モノ安全)〜0(広い)〜-1(逆相)。モノファイルは幅0・相関1として報告。NumPy必須。読み取り専用。"""
+    return analyze_stereo_field(file_path)
+
+
 def _audio_reference_profile(file_path: str) -> dict[str, Any]:
-    """Flatten a file's loudness + spectral analysis into the fields the comparator needs."""
+    """Flatten a file's loudness + spectral + stereo analysis into the comparator's fields."""
     measurements = analyze_loudness_file(file_path)["measurements"]
     features = extract_spectral_features(file_path)["features"]
+    stereo = analyze_stereo_field(file_path)
     return {
         "file": file_path,
         "integrated_lufs": measurements["integrated_lufs"],
@@ -466,6 +476,8 @@ def _audio_reference_profile(file_path: str) -> dict[str, Any]:
         "centroid_hz": features["spectral_centroid_hz"]["mean"],
         "rolloff_hz": features["spectral_rolloff_hz"]["mean"],
         "bands": extract_spectral_bands(file_path)["band_fractions"],
+        "width_side_ratio": stereo["width_side_ratio"],
+        "correlation": stereo["correlation"],
     }
 
 

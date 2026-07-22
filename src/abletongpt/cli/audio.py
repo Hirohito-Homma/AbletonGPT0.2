@@ -15,6 +15,7 @@
     python -m abletongpt.cli.audio spectral --file pad.wav
     python -m abletongpt.cli.audio spectral --file pad.wav --rolloff-percent 0.95 --json
     python -m abletongpt.cli.audio bands --file mix.wav
+    python -m abletongpt.cli.audio stereo --file mix.wav
     python -m abletongpt.cli.audio structure --file song.wav
     python -m abletongpt.cli.audio structure --file song.wav --window-seconds 0.5 --json
 
@@ -33,6 +34,7 @@ import sys
 
 from ..audio import (
     AudioDependencyError,
+    analyze_stereo_field,
     detect_onsets,
     estimate_chords,
     estimate_key,
@@ -321,6 +323,38 @@ def _print_bands(result: dict, *, as_json: bool) -> None:
         )
 
 
+def _print_stereo(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    if not result["is_stereo"]:
+        print("stereo: mono file (%d ch) -- reported as fully centred" % result["channels"])
+        return
+    print(
+        "stereo: width %.1f%% side   correlation %+.2f   balance %+.2f dB   (%g s @ %d Hz)"
+        % (
+            result["width_side_ratio"] * 100,
+            result["correlation"],
+            result["balance_db"],
+            result["duration_seconds"],
+            result["sample_rate"],
+        )
+    )
+
+
+def _cmd_stereo(args: argparse.Namespace) -> int:
+    try:
+        result = analyze_stereo_field(args.file)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_stereo(result, as_json=args.json)
+    return 0
+
+
 def _cmd_bands(args: argparse.Namespace) -> int:
     try:
         result = extract_spectral_bands(args.file)
@@ -427,6 +461,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     spectral.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     spectral.set_defaults(func=_cmd_spectral)
+
+    stereo = sub.add_parser("stereo", help="Measure the stereo field of an audio file.")
+    stereo.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    stereo.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    stereo.set_defaults(func=_cmd_stereo)
 
     bands = sub.add_parser("bands", help="Show the tonal band balance of an audio file.")
     bands.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")

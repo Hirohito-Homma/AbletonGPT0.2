@@ -12,6 +12,7 @@ loudness analysis supports works here too.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,24 @@ def _read_mono(path: Path):
             blocks.append(block)
     signal = np.concatenate(blocks) if blocks else np.zeros(0, dtype=np.float64)
     return signal, sample_rate
+
+
+def _read_channels(path: Path):
+    """Return ``(samples, sample_rate, channels)`` with ``samples`` shaped ``(frames, channels)``.
+
+    Unlike :func:`_read_mono` this keeps the channels separate, for stereo-field analysis.
+    """
+    np = _require_numpy()
+    with _open_audio(path) as stream:
+        sample_rate = int(stream.sample_rate)
+        channels = int(stream.channels)
+        blocks = []
+        for chunk in stream.frames(chunk_frames=65536):
+            block = np.asarray(chunk, dtype=np.float64)
+            usable = block[: (block.size // channels) * channels]
+            blocks.append(usable.reshape(-1, channels))
+    samples = np.concatenate(blocks) if blocks else np.zeros((0, channels), dtype=np.float64)
+    return samples, sample_rate, channels
 
 
 def _onset_strength(np, signal, hop: int):
@@ -1054,4 +1073,69 @@ def extract_spectral_bands(
         "sample_rate": sample_rate,
         "duration_seconds": round(signal.size / sample_rate, 3),
         "method": "stft-power-band-balance",
+    }
+
+
+def analyze_stereo_field(file_path: str) -> dict[str, Any]:
+    """Measure an audio file's stereo image: width, L/R phase correlation, and balance.
+
+    Uses a mid/side decomposition. ``width_side_ratio`` is the side channel's share of the
+    energy (0 = mono, ~0.5 = fully decorrelated, 1 = anti-phase). ``correlation`` is the L/R
+    phase-meter value (+1 in phase/mono-safe, 0 decorrelated, -1 anti-phase). ``balance_db``
+    is positive when the left channel is louder. Mono files report width 0 / correlation 1.
+    Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    samples, sample_rate, channels = _read_channels(Path(file_path))
+    if samples.shape[0] < sample_rate:
+        raise ValueError("audio is too short for stereo analysis (need at least ~1 second)")
+
+    duration = round(samples.shape[0] / sample_rate, 3)
+    if channels < 2:
+        return {
+            "read_only": True,
+            "file": str(file_path),
+            "channels": channels,
+            "is_stereo": False,
+            "width_side_ratio": 0.0,
+            "correlation": 1.0,
+            "balance_db": 0.0,
+            "sample_rate": sample_rate,
+            "duration_seconds": duration,
+            "method": "mid-side-correlation",
+            "note": "audio is mono; reported as fully centred",
+        }
+
+    left = samples[:, 0]
+    right = samples[:, 1]
+    left_energy = float(np.sum(left ** 2))
+    right_energy = float(np.sum(right ** 2))
+    mid = 0.5 * (left + right)
+    side = 0.5 * (left - right)
+    mid_energy = float(np.sum(mid ** 2))
+    side_energy = float(np.sum(side ** 2))
+    total = mid_energy + side_energy
+    if total <= 0.0:
+        raise ValueError("audio has no energy for stereo analysis")
+
+    denominator = math.sqrt(left_energy * right_energy)
+    correlation = float(np.sum(left * right) / denominator) if denominator > 0.0 else 1.0
+    if left_energy > 0.0 and right_energy > 0.0:
+        balance_db = 10.0 * math.log10(left_energy / right_energy)
+    else:
+        balance_db = 0.0
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "channels": channels,
+        "is_stereo": True,
+        "width_side_ratio": round(side_energy / total, 4),
+        "correlation": round(max(-1.0, min(1.0, correlation)), 4),
+        "balance_db": round(balance_db, 2),
+        "mid_energy_fraction": round(mid_energy / total, 4),
+        "side_energy_fraction": round(side_energy / total, 4),
+        "sample_rate": sample_rate,
+        "duration_seconds": duration,
+        "method": "mid-side-correlation",
     }
