@@ -182,6 +182,164 @@ def test_expression_apply_restores_source_notes_when_live_rejects_add():
     assert clip.add_calls == 2
 
 
+def test_note_edit_allows_reviewed_note_count_change():
+    module = _load_remote_script()
+    original = _note(pitch=60)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+    first = _note(pitch=60)
+    first["duration"] = 0.5
+    second = _note(pitch=60)
+    second["start_time"] = 0.5
+    second["duration"] = 0.5
+
+    result = surface._execute(
+        "apply_expression_to_clip",
+        {
+            "track_index": 0,
+            "clip_index": 0,
+            "notes": [first, second],
+            "expected_source_note_count": 1,
+            "allow_note_count_change": True,
+        },
+    )
+
+    assert clip.notes == [first, second]
+    assert result["source_note_count"] == 1
+    assert result["note_count"] == 2
+    assert result["note_count_changed"] is True
+    assert result["rollback_protected"] is True
+
+
+def test_note_count_change_restores_source_notes_when_live_rejects_add():
+    module = _load_remote_script()
+    original = _note(pitch=64, velocity=87, probability=0.75)
+    clip = _Clip([original], fail_first_add=True)
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=64), _note(pitch=66)],
+                "expected_source_note_count": 1,
+                "allow_note_count_change": True,
+            },
+        )
+    except TypeError as exc:
+        assert "simulated Live conversion failure" in str(exc)
+    else:
+        raise AssertionError("the simulated Live conversion failure must propagate")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 2
+
+
+def test_note_count_change_requires_reviewed_source_count():
+    module = _load_remote_script()
+    original = _note(pitch=67)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=67), _note(pitch=69)],
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "requires expected_source_note_count" in str(exc)
+    else:
+        raise AssertionError("the reviewed source count must be required")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 0
+
+
+def test_note_count_change_rejects_stale_source_count():
+    module = _load_remote_script()
+    original = _note(pitch=71)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=71), _note(pitch=72)],
+                "expected_source_note_count": 2,
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "note count changed before apply" in str(exc)
+    else:
+        raise AssertionError("a stale source count must be rejected")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 0
+
+
+def test_note_count_change_rejects_invalid_source_count():
+    module = _load_remote_script()
+    original = _note(pitch=72)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=72), _note(pitch=74)],
+                "expected_source_note_count": 1.5,
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "must be a non-negative integer" in str(exc)
+    else:
+        raise AssertionError("a non-integer source count must be rejected")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 0
+
+
+def test_note_count_change_may_not_clear_nonempty_clip():
+    module = _load_remote_script()
+    original = _note(pitch=73)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [],
+                "expected_source_note_count": 1,
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "may not clear the clip" in str(exc)
+    else:
+        raise AssertionError("note editing must not clear a nonempty clip")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 0
+
+
 def test_expression_apply_rejects_note_count_change_before_clearing_clip():
     module = _load_remote_script()
     original = _note(pitch=69)

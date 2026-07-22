@@ -49,6 +49,8 @@ export type ApplyExpressionParams = {
   clip_index: number;
   length_beats?: number;
   notes?: IncomingNote[];
+  expected_source_note_count?: number;
+  allow_note_count_change?: boolean;
 };
 
 export class SdkLiveProvider {
@@ -562,7 +564,9 @@ export class SdkLiveProvider {
     clip_index: number;
     name: string;
     length_beats: number;
+    source_note_count: number;
     note_count: number;
+    note_count_changed: boolean;
   }> {
     const trackIndex = Number(params.track_index);
     const clipIndex = Number(params.clip_index);
@@ -592,10 +596,32 @@ export class SdkLiveProvider {
       throw new Error("target clip is not a MIDI clip");
     }
 
-    // Replace the clip's notes wholesale; the setter overwrites the full note set, so the
-    // note count is whatever the caller sends (the expression plan keeps it unchanged).
+    // Expression and other in-place edits preserve note count by default. Split is the
+    // only current caller that opts into a count change, and it must send the reviewed
+    // source count so a stale plan is rejected before the wholesale replacement.
+    const sourceNoteCount = clip.notes.length;
     const incoming = Array.isArray(params.notes) ? params.notes : [];
     const notes = incoming.map(toNoteDescription);
+    const allowNoteCountChange = params.allow_note_count_change === true;
+    const expectedSourceNoteCount = Number(params.expected_source_note_count);
+    if (
+      params.expected_source_note_count != null &&
+      (!Number.isInteger(expectedSourceNoteCount) || expectedSourceNoteCount < 0)
+    ) {
+      throw new Error("expected_source_note_count must be a non-negative integer");
+    }
+    if (params.expected_source_note_count != null && sourceNoteCount !== expectedSourceNoteCount) {
+      throw new Error("source MIDI clip note count changed before apply");
+    }
+    if (sourceNoteCount !== notes.length && !allowNoteCountChange) {
+      throw new Error("expression replacement must preserve the source note count");
+    }
+    if (allowNoteCountChange && params.expected_source_note_count == null) {
+      throw new Error("note-count-changing replacement requires expected_source_note_count");
+    }
+    if (allowNoteCountChange && sourceNoteCount > 0 && notes.length === 0) {
+      throw new Error("note-count-changing replacement may not clear the clip");
+    }
     clip.notes = notes;
 
     return {
@@ -603,7 +629,9 @@ export class SdkLiveProvider {
       clip_index: clipIndex,
       name: clip.name,
       length_beats: clip.duration,
+      source_note_count: sourceNoteCount,
       note_count: notes.length,
+      note_count_changed: sourceNoteCount !== notes.length,
     };
   }
 }

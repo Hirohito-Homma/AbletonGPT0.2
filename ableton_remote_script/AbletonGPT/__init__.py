@@ -342,10 +342,30 @@ class AbletonGPTControlSurface(ControlSurface):
                 else original_payload
             )
             original_notes = [self._note_specification(note) for note in original_source]
-            if len(original_notes) != len(new_notes):
+            source_note_count = len(original_notes)
+            allow_note_count_change = params.get("allow_note_count_change") is True
+            if "expected_source_note_count" in params:
+                expected_source_note_count = params["expected_source_note_count"]
+                if (
+                    isinstance(expected_source_note_count, bool)
+                    or not isinstance(expected_source_note_count, int)
+                    or expected_source_note_count < 0
+                ):
+                    raise ValueError(
+                        "expected_source_note_count must be a non-negative integer"
+                    )
+                if source_note_count != expected_source_note_count:
+                    raise ValueError("source MIDI clip note count changed before apply")
+            if source_note_count != len(new_notes) and not allow_note_count_change:
                 raise ValueError(
                     "expression replacement must preserve the source note count"
                 )
+            if allow_note_count_change and "expected_source_note_count" not in params:
+                raise ValueError(
+                    "note-count-changing replacement requires expected_source_note_count"
+                )
+            if allow_note_count_change and source_note_count and not new_notes:
+                raise ValueError("note-count-changing replacement may not clear the clip")
 
             # The Python Remote Script API expects actual MidiNoteSpecification
             # objects. If Live rejects the replacement after the clear, restore the
@@ -370,7 +390,9 @@ class AbletonGPTControlSurface(ControlSurface):
                 "clip_index": index,
                 "clip": clip.name,
                 "length_beats": length,
+                "source_note_count": source_note_count,
                 "note_count": len(new_notes),
+                "note_count_changed": source_note_count != len(new_notes),
                 "rollback_protected": True,
             }
         if command == "get_audio_clip_paths":

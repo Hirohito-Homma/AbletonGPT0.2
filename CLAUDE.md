@@ -168,8 +168,10 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   <1 = staccato); note count unchanged. `build_split_plan` divides each note into `divisions` equal
   parts (count × divisions). Both keep pitch/velocity, same clip length. The
   `plan_/apply_legato_clip` and `plan_/apply_split_notes` pairs write back via the undoable
-  `apply_expression_to_clip` path (which clears+re-adds, so a changed count is fine) with a
-  fingerprint guard (shared `_apply_note_edit` helper). Pure, stdlib-only.
+  `apply_expression_to_clip` path with a fingerprint guard (shared `_apply_note_edit` helper).
+  Split alone opts into note-count changes and sends the reviewed source-note count; the Remote
+  Script rejects stale counts, implicit count changes, and attempts to clear the clip. Pure,
+  stdlib-only.
 
 ## Two separate ports — do not confuse them
 
