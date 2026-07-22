@@ -158,6 +158,11 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   are kept. The length changes, so this is a plan/**create** (not in-place): the
   `plan_/create_timescale_clip` pair writes into an empty slot via the non-overwriting
   `create_midi_clip` with a source-fingerprint guard. Pure, stdlib-only.
+- **`reverse.py`** — `build_reverse_plan` reverses a clip in time (retrograde): each note's start
+  becomes `length - (start + duration)`, so the pattern plays backwards. Pitch/velocity/duration,
+  note count and clip length are all preserved (in-place edit). The `plan_/apply_reverse_clip` pair
+  writes back via the undoable `apply_expression_to_clip` path with a fingerprint guard. Pure,
+  stdlib-only.
 
 ## Two separate ports — do not confuse them
 

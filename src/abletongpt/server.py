@@ -38,6 +38,7 @@ from .progression import build_progression_analysis
 from .quantize import build_quantize_plan
 from .reference import build_reference_comparison
 from .remap import build_scale_remap_plan
+from .reverse import build_reverse_plan
 from .scale import build_scale_quantize_plan, parse_scale
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
@@ -162,6 +163,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
+            "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -877,6 +879,52 @@ def apply_velocity_groove(
         "changed_notes": plan["changed_notes"],
         "max_velocity_delta": plan["max_velocity_delta"],
         "result_velocity_range": plan["result_velocity_range"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+@mcp.tool()
+def plan_reverse_clip(track_index: int, clip_index: int) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップを時間軸で反転(逆行/リバース)するプランを作る。各ノートの開始位置を
+    length-(start+duration)へ移し、パターンを逆再生にする。音高/ベロシティ/長さ/ノート数・クリップ長は不変。
+    適用はapply_reverse_clip。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_reverse_plan(clip_data)
+    plan["next_step"] = (
+        "内容を確認し、apply_reverse_clipに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_reverse_clip(
+    track_index: int,
+    clip_index: int,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_reverse_clipで確認した時間反転を、既存MIDIクリップのノートへ適用する。開始位置のみを鏡写しにする
+    (ノート数・音高・長さは不変、LiveのUndoで戻せる)。expected_source_fingerprintを渡すと確認後にクリップが
+    変わっていた場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_reverse_plan(clip_data)
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "note_count": plan["note_count"],
+        "length_beats": length,
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }
