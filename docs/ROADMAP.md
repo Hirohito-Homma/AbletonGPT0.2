@@ -20,7 +20,7 @@
 - Intro / verse / pre-chorus / chorus / bridge section graph (pop-song arrange style landed; repeated verses/choruses reuse one source scene)
 - Reusable song-form templates for Arrangement View (electronic build/drop styles plus the pop-song verse/chorus form; more genres are one registry entry each)
 - Preset, Pack and kit browsing with exact installed-content availability
-- Audio-track key, tempo, chord and melody extraction for contextual composition
+- Audio-track key, tempo, chord and melody extraction for contextual composition (offline tempo/BPM estimation landed via the opt-in `audio` extra; key/chord/melody to follow)
 - Clip automation, probability and expressive MIDI editing (expression engine and plan_expression / apply_expression landed: accent / swing / humanize / weak-beat probability are planned and applied to clip notes; MIDI CC automation is planned but not yet written back to Live)
 - Non-destructive project snapshots and rollback bundles
 
