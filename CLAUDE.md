@@ -102,6 +102,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   `semitones` or a `target_key` (key name/Camelot via `harmony.parse_key`, source key detected via
   `contextual.analyze_midi_context` unless given); apply writes back through the undoable
   `apply_expression_to_clip` path with a fingerprint guard. Edits only the target clip's notes.
+- **`scale.py`** — `build_scale_quantize_plan` snaps a clip's out-of-scale notes to the nearest
+  in-scale pitch (`snap_pitch`: nearest by distance, tie snaps down, stays in 0..127); in-scale
+  notes and note count are untouched. `SCALE_INTERVALS`/`parse_scale` cover major/minor/modes/
+  pentatonics/blues/chromatic (with aliases). Pure, stdlib-only. The `plan_/apply_scale_quantize_midi`
+  pair resolves the tonic+scale from a `key` (via `harmony.parse_key`; `scale="auto"` follows the
+  key's mode) or detects it from the clip (`contextual.analyze_midi_context`); apply writes back
+  through the same undoable `apply_expression_to_clip` path with a fingerprint guard.
 
 ## Two separate ports — do not confuse them
 

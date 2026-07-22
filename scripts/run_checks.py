@@ -60,6 +60,7 @@ def main() -> None:
         "abletongpt.loudness",
         "abletongpt.meters",
         "abletongpt.reference",
+        "abletongpt.scale",
         "abletongpt.server",
         "abletongpt.snapshots",
         "abletongpt.targets",
@@ -81,7 +82,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 38, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 39, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 
