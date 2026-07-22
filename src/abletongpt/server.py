@@ -18,6 +18,7 @@ from .audio import (
     estimate_tempo,
     extract_melody,
     extract_spectral_features,
+    segment_structure,
     track_beats,
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
@@ -117,6 +118,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF onset/transient detection (requires the audio extra: NumPy)",
             "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
             "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
+            "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -426,6 +428,13 @@ def analyze_audio_spectral(file_path: str, rolloff_percent: float = 0.85) -> dic
     """WAV/AIFFを変更せず、音色のスペクトル特徴(セントロイド=明るさ・バンド幅・ロールオフ・フラットネス・
     ゼロ交差率・RMS)をオフライン抽出する。有音フレームで平均/標準偏差/最小/最大を集計。NumPy必須。読み取り専用。"""
     return extract_spectral_features(file_path, rolloff_percent=rolloff_percent)
+
+
+@mcp.tool()
+def analyze_audio_structure(file_path: str, window_seconds: float = 1.0) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、曲構造(セクション境界・秒)をオフライン推定する。クロマ自己相似行列＋Footeノベルティで
+    境界を検出し、各セクションを和声の類似度でA/B/Cラベル付け(学習型ではない)。NumPy必須。読み取り専用。"""
+    return segment_structure(file_path, window_seconds=window_seconds)
 
 
 @mcp.tool()
