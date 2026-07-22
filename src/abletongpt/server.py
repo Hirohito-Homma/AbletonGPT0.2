@@ -27,7 +27,7 @@ from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .snapshots import build_snapshot, diff_snapshots
-from .transcription import build_midi_from_melody
+from .transcription import build_midi_from_chords, build_midi_from_melody
 from .vocal import build_vocal_plan
 
 
@@ -121,6 +121,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
             "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
             "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
+            "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -479,6 +480,50 @@ def create_midi_from_audio_melody(
     )
     result["source"] = "audio_melody"
     result["note_count"] = plan["note_count"]
+    return result
+
+
+@mcp.tool()
+def plan_midi_from_audio_chords(
+    file_path: str,
+    tempo: float,
+    octave: int = 3,
+    quantize: float = 0.0,
+    window_seconds: float = 0.5,
+) -> dict[str, Any]:
+    """WAV/AIFFのコード進行を抽出し、指定tempo(BPM)でブロックコード(三和音)のMIDIノート(拍単位)へ変換する計画を返す。
+    octaveはコードの高さ(3でC=48)、quantizeは拍グリッド。読み取り専用。create前のレビュー用。NumPy必須。"""
+    chords = estimate_chords(file_path, window_seconds=window_seconds)
+    return build_midi_from_chords(chords, tempo, octave=octave, quantize=quantize)
+
+
+@mcp.tool()
+def create_midi_from_audio_chords(
+    file_path: str,
+    track_index: int,
+    clip_index: int,
+    tempo: float,
+    name: str = "Audio Chords",
+    octave: int = 3,
+    quantize: float = 0.0,
+    window_seconds: float = 0.5,
+) -> dict[str, Any]:
+    """WAV/AIFFのコード進行を抽出し、空のSessionスロットへブロックコードの編集可能なMIDIクリップとして書き出す。
+    既存クリップは上書きしない。まずplan_midi_from_audio_chordsで内容を確認すること。NumPy必須。"""
+    chords = estimate_chords(file_path, window_seconds=window_seconds)
+    plan = build_midi_from_chords(chords, tempo, octave=octave, quantize=quantize)
+    _validate_midi_clip(track_index, clip_index, plan["length_beats"], plan["notes"])
+    result = bridge.call(
+        "create_midi_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        name=name[:200],
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    result["source"] = "audio_chords"
+    result["note_count"] = plan["note_count"]
+    result["chord_count"] = plan["chord_count"]
     return result
 
 
