@@ -43,6 +43,32 @@ test("create_midi_clip records a non-destructive mutation", async () => {
   assert.equal(provider.createdClips.length, 1);
 });
 
+test("apply_expression_to_clip records a note replacement", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const response = await disp.handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      length_beats: 8,
+      notes: [{ pitch: 60, start_time: 0, duration: 1, velocity: 90, probability: 0.8 }],
+    },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.note_count, 1);
+  assert.equal(provider.appliedExpressions.length, 1);
+});
+
+test("apply_expression_to_clip rejects a bad target", async () => {
+  const response = await dispatcher().handle({
+    command: "apply_expression_to_clip",
+    params: { track_index: -1, clip_index: 0, notes: [] },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /track_index/);
+});
+
 test("create_midi_clip rejects a bad target", async () => {
   const response = await dispatcher().handle({
     command: "create_midi_clip",
@@ -76,6 +102,13 @@ test("mismatched protocol version is rejected", async () => {
 test("the command allowlist is exactly the v1 set", () => {
   assert.deepEqual(
     [...ALLOWED_COMMANDS].sort(),
-    ["create_midi_clip", "get_selected_context", "get_tempo", "get_tracks", "ping"],
+    [
+      "apply_expression_to_clip",
+      "create_midi_clip",
+      "get_selected_context",
+      "get_tempo",
+      "get_tracks",
+      "ping",
+    ],
   );
 });
