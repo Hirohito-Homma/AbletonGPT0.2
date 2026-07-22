@@ -92,13 +92,30 @@ def estimate_tempo(
     if not np.any(onset):
         raise ValueError("audio has no detectable onsets for tempo estimation")
 
-    # FFT autocorrelation of the onset envelope.
+    tempo, confidence = _tempo_from_onset(np, onset, sample_rate / hop, min_bpm, max_bpm)
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "tempo_bpm": round(float(tempo), 2),
+        "confidence": round(max(0.0, min(1.0, confidence)), 4),
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "bpm_range": [min_bpm, max_bpm],
+        "method": "onset-autocorrelation",
+    }
+
+
+def _tempo_from_onset(np, onset, fps: float, min_bpm: float, max_bpm: float):
+    """Return ``(tempo_bpm, confidence)`` from a centred onset envelope via autocorrelation.
+
+    Shared by :func:`estimate_tempo` and :func:`track_beats` so both agree on the tempo.
+    """
     n = onset.size
     size = 1 << (2 * n - 1).bit_length()
     spectrum = np.fft.rfft(onset, size)
     autocorr = np.fft.irfft(spectrum * np.conj(spectrum), size)[:n]
 
-    fps = sample_rate / hop
     min_lag = max(1, int(round(fps * 60.0 / max_bpm)))
     max_lag = min(n - 1, int(round(fps * 60.0 / min_bpm)))
     if min_lag >= max_lag:
@@ -131,17 +148,7 @@ def estimate_tempo(
 
     tempo = 60.0 * fps / refined_lag
     confidence = float(autocorr[best_lag] / (autocorr[0] + 1e-12))
-
-    return {
-        "read_only": True,
-        "file": str(file_path),
-        "tempo_bpm": round(float(tempo), 2),
-        "confidence": round(max(0.0, min(1.0, confidence)), 4),
-        "sample_rate": sample_rate,
-        "duration_seconds": round(signal.size / sample_rate, 3),
-        "bpm_range": [min_bpm, max_bpm],
-        "method": "onset-autocorrelation",
-    }
+    return tempo, confidence
 
 
 # Pitch-class names, index 0 == C. Sharps only, matching how Live labels roots.
@@ -631,4 +638,86 @@ def _onset_record(index: int, hop: int, sample_rate: int, strength: float) -> di
         "time_seconds": round((index + 1) * hop / sample_rate, 4),
         "strength": round(float(strength), 4),
         "strength_raw": float(strength),
+    }
+
+
+def track_beats(
+    file_path: str,
+    *,
+    min_bpm: float = 60.0,
+    max_bpm: float = 200.0,
+    hop: int = 256,
+    beats_per_bar: int = 4,
+) -> dict[str, Any]:
+    """Track the beat grid of an audio file, offline and deterministically.
+
+    Method: estimate the tempo from the onset envelope (shared with :func:`estimate_tempo`),
+    then fit the beat phase by sliding a constant-period pulse comb over the envelope and
+    keeping the offset whose beat positions collect the most onset energy. Beats are laid on
+    a constant-tempo grid; ``beats_per_bar`` groups them into bar starts assuming the first
+    beat is a downbeat (no true meter/downbeat detection). Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if not 20.0 <= min_bpm < max_bpm <= 400.0:
+        raise ValueError("require 20 <= min_bpm < max_bpm <= 400")
+    if hop < 64:
+        raise ValueError("hop must be at least 64 samples")
+    if not 1 <= beats_per_bar <= 16:
+        raise ValueError("beats_per_bar must be between 1 and 16")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for beat tracking (need at least ~1 second)")
+
+    envelope = _onset_strength(np, signal, hop)
+    peak = float(envelope.max()) if envelope.size else 0.0
+    if peak <= 0.0:
+        raise ValueError("audio has no detectable onsets for beat tracking")
+
+    fps = sample_rate / hop
+    tempo, tempo_confidence = _tempo_from_onset(np, envelope - envelope.mean(), fps, min_bpm, max_bpm)
+    period = 60.0 * fps / tempo  # beat period in envelope frames
+
+    # Fit the phase: slide the comb over one beat period and keep the offset whose beat
+    # positions (linearly interpolated into the envelope) collect the most onset energy.
+    n = envelope.size
+    frames = np.arange(n)
+    beat_count = int(np.floor((n - 1) / period)) + 1
+    steps = max(8, int(round(period)))
+    best_phase, best_score = 0.0, -1.0
+    for step in range(steps):
+        phase = step * period / steps
+        positions = phase + np.arange(beat_count) * period
+        positions = positions[positions <= n - 1]
+        score = float(np.interp(positions, frames, envelope).sum())
+        if score > best_score:
+            best_score, best_phase = score, phase
+
+    positions = best_phase + np.arange(beat_count) * period
+    positions = positions[positions <= n - 1]
+    strengths = np.interp(positions, frames, envelope) / peak
+    beats = [
+        {
+            "time_seconds": round((position + 1) * hop / sample_rate, 4),
+            "strength": round(float(strength), 4),
+        }
+        for position, strength in zip(positions, strengths)
+    ]
+    beat_times = [beat["time_seconds"] for beat in beats]
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "tempo_bpm": round(float(tempo), 2),
+        "tempo_confidence": round(max(0.0, min(1.0, tempo_confidence)), 4),
+        "beats": beats,
+        "beat_times": beat_times,
+        "beat_count": len(beats),
+        "beat_period_seconds": round(60.0 / tempo, 4),
+        "first_beat_seconds": beat_times[0] if beat_times else None,
+        "beats_per_bar": beats_per_bar,
+        "bar_start_times": beat_times[::beats_per_bar],
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "method": "onset-autocorrelation-comb-phase",
     }

@@ -10,6 +10,8 @@
     python -m abletongpt.cli.audio melody --file lead.wav --min-f0 110 --max-f0 880 --json
     python -m abletongpt.cli.audio onsets --file loop.wav
     python -m abletongpt.cli.audio onsets --file loop.wav --delta 0.05 --json
+    python -m abletongpt.cli.audio beats --file loop.wav
+    python -m abletongpt.cli.audio beats --file loop.wav --beats-per-bar 3 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -31,6 +33,7 @@ from ..audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    track_beats,
 )
 
 
@@ -193,6 +196,28 @@ def _cmd_melody(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_beats(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "beats: %d @ %g BPM  (confidence %.2f)   %g s @ %d Hz   %d/bar   [%s]"
+        % (
+            result["beat_count"],
+            result["tempo_bpm"],
+            result["tempo_confidence"],
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["beats_per_bar"],
+            result["method"],
+        )
+    )
+    bar_starts = set(result["bar_start_times"])
+    for beat in result["beats"]:
+        marker = "|" if beat["time_seconds"] in bar_starts else " "
+        print("  %s %8.3f s   (strength %.2f)" % (marker, beat["time_seconds"], beat["strength"]))
+
+
 def _cmd_onsets(args: argparse.Namespace) -> int:
     try:
         result = detect_onsets(args.file, delta=args.delta)
@@ -203,6 +228,19 @@ def _cmd_onsets(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_onsets(result, as_json=args.json)
+    return 0
+
+
+def _cmd_beats(args: argparse.Namespace) -> int:
+    try:
+        result = track_beats(args.file, beats_per_bar=args.beats_per_bar)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_beats(result, as_json=args.json)
     return 0
 
 
@@ -262,6 +300,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     onsets.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     onsets.set_defaults(func=_cmd_onsets)
+
+    beats = sub.add_parser("beats", help="Track the beat grid (beat times) of an audio file.")
+    beats.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    beats.add_argument(
+        "--beats-per-bar",
+        type=int,
+        default=4,
+        dest="beats_per_bar",
+        help="Group beats into bars of this many (assumes the first beat is a downbeat).",
+    )
+    beats.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    beats.set_defaults(func=_cmd_beats)
 
     return parser
 
