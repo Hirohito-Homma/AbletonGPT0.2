@@ -175,6 +175,8 @@ class AbletonGPTControlSurface(ControlSurface):
             )
         if command == "add_locators":
             return self._add_locators(song, params.get("locators", []))
+        if command == "get_clip_warp_markers":
+            return self._get_clip_warp_markers(song, params)
         if command == "create_track":
             track_type = params["track_type"]
             index = int(params.get("index", -1))
@@ -1037,6 +1039,35 @@ class AbletonGPTControlSurface(ControlSurface):
                 "asynchronously -- re-check with get_track_devices"
             )
         return result
+
+    def _get_clip_warp_markers(self, song, params):
+        """Read an audio clip's warp markers (beat_time/sample_time). Read-only."""
+        track = self._track(song, params["track_index"])
+        index = int(params["clip_index"])
+        if index < 0 or index >= len(track.clip_slots):
+            raise IndexError("clip index out of range")
+        slot = track.clip_slots[index]
+        if not slot.has_clip:
+            raise ValueError("target clip slot is empty")
+        clip = slot.clip
+        if not bool(clip.is_audio_clip):
+            raise ValueError("target clip is not an audio clip")
+        markers = [
+            {"beat_time": float(marker.beat_time), "sample_time": float(marker.sample_time)}
+            for marker in clip.warp_markers
+        ]
+        return {
+            "track": track.name,
+            "track_index": int(params["track_index"]),
+            "clip_index": index,
+            "clip": clip.name,
+            "is_audio_clip": True,
+            "warping": bool(clip.warping),
+            "warp_mode": int(clip.warp_mode),
+            "marker_count": len(markers),
+            "markers": markers,
+            "read_only": True,
+        }
 
     def _add_locators(self, song, locators):
         """Add named Arrangement locators (cue points) at the given beat positions.

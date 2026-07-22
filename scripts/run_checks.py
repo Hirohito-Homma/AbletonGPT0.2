@@ -61,6 +61,7 @@ def main() -> None:
         "abletongpt.snapshots",
         "abletongpt.transcription",
         "abletongpt.vocal",
+        "abletongpt.warp",
     ):
         try:
             __import__(module_name)
@@ -75,7 +76,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 32, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 33, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 
