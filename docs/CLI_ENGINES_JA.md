@@ -1,12 +1,13 @@
-# エンジンCLIガイド（instruments / loudness / vocal / compose / contextual）
+# エンジンCLIガイド（instruments / loudness / vocal / compose / contextual / expression）
 
-AbletonGPTの純ロジックエンジンは、MCPサーバーを介さずコマンドラインからも直接使えます。いずれも**決定論的**で、**Ableton Liveへ接続しません**（loudness と contextual はファイルを読むだけ、他はファイルI/Oもなし）。すべて `--json` で機械可読出力に切り替えられます。
+AbletonGPTの純ロジックエンジンは、MCPサーバーを介さずコマンドラインからも直接使えます。いずれも**決定論的**で、**Ableton Liveへ接続しません**（loudness / contextual / expression はファイルを読むだけ、他はファイルI/Oもなし）。すべて `--json` で機械可読出力に切り替えられます。
 
 - `python -m abletongpt.cli.instruments` — ジャンル/ムードから純正音源の選定プランを出力
 - `python -m abletongpt.cli.loudness` — WAV/AIFF のLUFS等をオフライン解析（読み取り専用）
 - `python -m abletongpt.cli.vocal` — 歌詞から Vocal Guide メロディの計画を出力
 - `python -m abletongpt.cli.compose` — 設定からマルチトラックのソングスケッチを生成
 - `python -m abletongpt.cli.contextual` — 既存MIDIクリップを解析し、補完トラックを計画
+- `python -m abletongpt.cli.expression` — 既存MIDIクリップに表情（アクセント/スイング/ヒューマナイズ）を付与
 
 アレンジ計画（`arrange` / `jobs` / `arrange-run`）については [アレンジCLIガイド](CLI_ARRANGE_JA.md) を参照してください。
 
@@ -22,7 +23,7 @@ abletongpt-cli contextual analyze --clip clip.json
 abletongpt-cli loudness track.wav --json
 ```
 
-サブコマンド: `compose` / `contextual` / `instruments` / `vocal` / `arrange` / `loudness` / `jobs`。単なるディスパッチャなので、ファイルもネットワークもAbletonも触りません。
+サブコマンド: `compose` / `contextual` / `instruments` / `expression` / `vocal` / `arrange` / `loudness` / `jobs`。単なるディスパッチャなので、ファイルもネットワークもAbletonも触りません。
 
 ---
 
@@ -214,8 +215,46 @@ next: 内容を確認後、create_complementary_midi_trackで新規MIDIトラッ
 
 ---
 
+## 6. `expression` — 既存クリップの表情付け
+
+既存MIDIクリップのノート列に、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率を**決定論的に**付与します。ノートの追加・削除はせず、表情だけを差し替える計画を返す**読み取り専用**エンジンです（作曲エンジンの swing/humanize とは別で、こちらは「既存クリップの加工」用）。
+
+入力は `contextual` と同じクリップJSON（`length_beats` と `notes` の `{pitch, start_time, duration, velocity}`、任意で `probability`）。すべての制御は既定で無効（no-op）なので、無指定なら元のノートがそのまま返ります。
+
+```bash
+python -m abletongpt.cli.expression --clip clip.json --accent 0.6 --swing 0.4
+python -m abletongpt.cli.expression --clip clip.json --humanize 0.3 --seed 7 --json
+python -m abletongpt.cli.expression --clip clip.json --weak-beat-probability 0.7 --grid-beats 0.25
+```
+
+出力例:
+
+```text
+$ python -m abletongpt.cli.expression --clip clip.json --accent 0.6 --swing 0.4
+source: Keys  8 beats, 2 notes
+accent 0.6  swing 0.4  humanize 0  weak-prob 1  (grid 0.5, 4/bar, seed 0)
+velocity: 80 -> 84 (range 74-94)   timing shift: max 0.1, avg 0.05 beats
+min probability after: 1
+```
+
+| 引数 | 必須 | 説明 |
+| --- | --- | --- |
+| `--clip` | ○ | MIDIクリップJSONのパス |
+| `--accent` | | 拍の強弱によるベロシティアクセント 0.0–1.0（既定 0.0）。ダウンビートを強調し裏拍を弱める |
+| `--swing` | | グリッド裏のノートを後ろへずらす量 0.0–1.0（既定 0.0） |
+| `--humanize` | | タイミング/ベロシティの揺らぎ 0.0–1.0（既定 0.0、seedで再現） |
+| `--weak-beat-probability` | | グリッド裏ノートのノート確率 0.0–1.0（既定 1.0＝無効） |
+| `--beats-per-bar` | | 拍子の分子 1–16（既定 4） |
+| `--grid-beats` | | スイング/アクセントの基準グリッド（拍）。8分なら 0.5、16分なら 0.25（既定 0.5） |
+| `--seed` | | 決定論シード（既定 0） |
+| `--json` | | 完全計画（notes / diff / apply_contract など）をJSONで出力 |
+
+**読み取り専用**でクリップを書き換えません。ノート数は不変で、`apply_contract` は「確認必須・ノート追加削除なし・既存クリップのノートを差し替え」を示します。実際の適用は承認後の別ツールで行います（後続実装）。ファイル無し・ノート無し・範囲外の設定値は exit 2。
+
+---
+
 ## 共通仕様
 
 - すべてのコマンドが `--json` を受け付け、標準出力に整形済みJSONを返します（日本語ラベルは読みやすさのため非エスケープ）。
-- どれも **Ableton Live へ接続しません**。loudness と contextual はファイルを読むだけ、instruments / vocal / compose はファイルI/Oもありません。
+- どれも **Ableton Live へ接続しません**。loudness / contextual / expression はファイルを読むだけ、instruments / vocal / compose はファイルI/Oもありません。
 - 不正な引数値は終了コード **2** で報告します。
