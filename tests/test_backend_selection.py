@@ -43,6 +43,8 @@ def test_env_selects_extensions_backend(monkeypatch):
         ("Extensions", "extensions"),
         ("extension", "extensions"),
         ("  extensions  ", "extensions"),
+        ("auto", "auto"),
+        ("AUTO", "auto"),
     ],
 )
 def test_aliases_and_normalization(monkeypatch, value, expected):
@@ -58,9 +60,26 @@ def test_unknown_backend_is_rejected(monkeypatch):
         server.resolve_backend_name()
 
 
+def test_auto_backend_builds_a_fallback_bridge(monkeypatch):
+    from abletongpt.backends import FallbackBridge
+
+    monkeypatch.setenv("ABLETONGPT_BACKEND", "auto")
+
+    assert server.resolve_backend_name() == "auto"
+    assert isinstance(server.select_backend(), FallbackBridge)
+
+
 def test_capabilities_report_active_backend(monkeypatch):
     monkeypatch.setenv("ABLETONGPT_BACKEND", "extensions")
 
     caps = server.get_abletongpt_capabilities()
     assert caps["backend"] == "extensions"
-    assert caps["available_backends"] == ["remote_script", "extensions"]
+    assert caps["available_backends"] == ["remote_script", "extensions", "auto"]
+
+
+def test_capabilities_does_not_probe_for_auto(monkeypatch):
+    # Reporting capabilities must not open a socket, even in auto mode.
+    monkeypatch.setenv("ABLETONGPT_BACKEND", "auto")
+
+    caps = server.get_abletongpt_capabilities()
+    assert caps["backend"] == "auto"

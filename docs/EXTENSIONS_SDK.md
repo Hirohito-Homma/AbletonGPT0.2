@@ -28,12 +28,20 @@ The MCP server chooses one backend at startup from the `backend` setting
   Remote Script. Works on stable Live 11+.
 - `extensions` (also `extension`) — the Ableton Extensions SDK companion
   described below. Requires the Live 12 Suite Beta and a running companion.
+- `auto` — prefer the Extensions companion, fall back to the Remote Script if
+  the companion is unreachable.
 
 Both backends expose the same `call(command, **params)` contract, so every MCP
 tool works unchanged regardless of the selected backend; only the in-Live
 handler differs. Selection is lazy — no socket is opened until the first call.
-`get_abletongpt_capabilities` reports the active `backend`. Automatic
-detection / fallback between backends is intentionally not implemented yet.
+`get_abletongpt_capabilities` reports the configured `backend` (without probing).
+
+`auto` decides once, using a read-only `ping` probe on first use, then stays on
+that backend for the session. This is deliberate: a real command is only ever
+sent to one backend, so a mutating command can never be applied twice. Only a
+connection failure (raised before a command reaches Live) triggers the
+fallback; a command that reaches Live and fails there propagates unchanged and
+is never retried on the other backend.
 
 ```bash
 ABLETONGPT_BACKEND=extensions uv run abletongpt
