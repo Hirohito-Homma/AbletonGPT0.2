@@ -24,7 +24,7 @@ ChatGPT / Codex -> MCP server -> localhost TCP -> Ableton Remote Script -> Live 
 - AIボーカル: 歌詞・Vocal Guide設計、MIDI作成、レンダリング済みWAV取り込み
 - 安全性: localhost限定、共有トークン、入力検証、削除・上書き・任意コード実行なし
 
-設計の詳細は [Architecture](docs/ARCHITECTURE.md)、プロンプト例は [Prompt examples](examples/prompts_ja.md) を参照してください。曲構成を計画・実行するコマンドライン（`arrange` / `jobs` / `arrange-run`）の使い方は [アレンジCLIガイド](docs/CLI_ARRANGE_JA.md)、純ロジックエンジンのCLI（`instruments` / `loudness` / `vocal` / `compose` / `contextual`）は [エンジンCLIガイド](docs/CLI_ENGINES_JA.md) にまとめています。
+設計の詳細は [Architecture](docs/ARCHITECTURE.md)、プロンプト例は [Prompt examples](examples/prompts_ja.md) を参照してください。曲構成を計画・実行するコマンドライン（`arrange` / `jobs` / `arrange-run`）の使い方は [アレンジCLIガイド](docs/CLI_ARRANGE_JA.md)、純ロジックエンジンのCLI（`instruments` / `loudness` / `vocal` / `compose` / `contextual`）は [エンジンCLIガイド](docs/CLI_ENGINES_JA.md) にまとめています。これらは統合エントリポイント `abletongpt-cli <サブコマンド>` からも呼び出せます。
 
 ## 必要なもの
 
