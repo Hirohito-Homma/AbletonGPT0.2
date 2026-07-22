@@ -14,6 +14,8 @@
     python -m abletongpt.cli.audio beats --file loop.wav --beats-per-bar 3 --json
     python -m abletongpt.cli.audio spectral --file pad.wav
     python -m abletongpt.cli.audio spectral --file pad.wav --rolloff-percent 0.95 --json
+    python -m abletongpt.cli.audio structure --file song.wav
+    python -m abletongpt.cli.audio structure --file song.wav --window-seconds 0.5 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -36,6 +38,7 @@ from ..audio import (
     estimate_tempo,
     extract_melody,
     extract_spectral_features,
+    segment_structure,
     track_beats,
 )
 
@@ -267,6 +270,26 @@ def _cmd_beats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_structure(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "structure: %d sections   (%g s @ %d Hz)   [%s]"
+        % (
+            result["segment_count"],
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["method"],
+        )
+    )
+    for segment in result["segments"]:
+        print(
+            "  %s   %8.3f - %8.3f s"
+            % (segment["label"], segment["start_seconds"], segment["end_seconds"])
+        )
+
+
 def _cmd_spectral(args: argparse.Namespace) -> int:
     try:
         result = extract_spectral_features(args.file, rolloff_percent=args.rolloff_percent)
@@ -277,6 +300,19 @@ def _cmd_spectral(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_spectral(result, as_json=args.json)
+    return 0
+
+
+def _cmd_structure(args: argparse.Namespace) -> int:
+    try:
+        result = segment_structure(args.file, window_seconds=args.window_seconds)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_structure(result, as_json=args.json)
     return 0
 
 
@@ -360,6 +396,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     spectral.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     spectral.set_defaults(func=_cmd_spectral)
+
+    structure = sub.add_parser("structure", help="Segment an audio file into sections.")
+    structure.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    structure.add_argument(
+        "--window-seconds",
+        type=float,
+        default=1.0,
+        dest="window_seconds",
+        help="Analysis window length in seconds (structure time resolution).",
+    )
+    structure.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    structure.set_defaults(func=_cmd_structure)
 
     return parser
 

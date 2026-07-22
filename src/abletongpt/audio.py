@@ -823,3 +823,163 @@ def extract_spectral_features(
         "duration_seconds": round(signal.size / sample_rate, 3),
         "method": "stft-spectral-features",
     }
+
+
+def _checkerboard_kernel(np, half: int):
+    """A Gaussian-tapered checkerboard kernel for Foote structural-novelty detection.
+
+    Positive on the top-left/bottom-right quadrants (self-similar past and future) and
+    negative on the cross quadrants, so correlating it along an SSM diagonal peaks where the
+    audio before a point is unlike the audio after it -- a section boundary.
+    """
+    coords = np.arange(-half, half) + 0.5
+    a = coords[:, None]
+    b = coords[None, :]
+    sign = np.sign(a) * np.sign(b)
+    sigma = max(1.0, half / 2.0)
+    gaussian = np.exp(-(a ** 2 + b ** 2) / (2.0 * sigma ** 2))
+    return sign * gaussian
+
+
+_SECTION_LABELS = tuple(chr(ord("A") + i) for i in range(26))
+
+
+def _label_segments(np, segments, window_vectors, label_threshold: float):
+    """Assign A/B/C labels: a segment reuses the label of an earlier section it resembles."""
+    label_centroids: list[tuple[str, Any]] = []
+    labels: list[str] = []
+    for start, end in segments:
+        centroid = window_vectors[start:end].mean(axis=0)
+        norm = float(np.linalg.norm(centroid))
+        if norm:
+            centroid = centroid / norm
+        best_label, best_similarity = None, label_threshold
+        for label, existing in label_centroids:
+            similarity = float(centroid @ existing)
+            if similarity >= best_similarity:
+                best_label, best_similarity = label, similarity
+        if best_label is None:
+            best_label = (
+                _SECTION_LABELS[len(label_centroids)]
+                if len(label_centroids) < len(_SECTION_LABELS)
+                else "?"
+            )
+            label_centroids.append((best_label, centroid))
+        labels.append(best_label)
+    return labels
+
+
+def segment_structure(
+    file_path: str,
+    *,
+    frame_size: int = 4096,
+    window_seconds: float = 1.0,
+    kernel_seconds: float = 8.0,
+    min_segment_seconds: float = 4.0,
+    threshold: float = 0.3,
+    label_threshold: float = 0.8,
+    min_freq: float = 55.0,
+    max_freq: float = 5000.0,
+) -> dict[str, Any]:
+    """Segment an audio file into sections (intro/verse/chorus-like), offline.
+
+    Method: the shared DFT chromagram is averaged into ``window_seconds`` windows; a cosine
+    self-similarity matrix of those windows is correlated with a Gaussian checkerboard kernel
+    (Foote novelty) to score each window as a possible boundary; novelty peaks become section
+    boundaries, and each section is given an A/B/C label by matching its mean chroma to
+    earlier sections. Harmonic structure only -- not a trained segmenter. Read-only.
+    """
+    np = _require_numpy()
+    if not 0.1 <= window_seconds <= 10.0:
+        raise ValueError("window_seconds must be between 0.1 and 10")
+    if kernel_seconds < 2 * window_seconds:
+        raise ValueError("kernel_seconds must be at least two windows")
+    if min_segment_seconds < window_seconds:
+        raise ValueError("min_segment_seconds must be at least one window")
+    if not 0.0 <= threshold < 1.0:
+        raise ValueError("threshold must be in [0, 1)")
+    if not 0.0 < label_threshold <= 1.0:
+        raise ValueError("label_threshold must be in (0, 1]")
+
+    chroma_frames, hop, sample_rate, signal_size = _chromagram(
+        np, file_path, frame_size, min_freq, max_freq
+    )
+    duration = signal_size / sample_rate
+
+    fps = sample_rate / hop
+    frames_per_window = max(1, int(round(window_seconds * fps)))
+    n_frames = chroma_frames.shape[0]
+    n_windows = int(np.ceil(n_frames / frames_per_window)) if n_frames else 0
+    if n_windows < 4:
+        raise ValueError("audio is too short for structural segmentation (need several windows)")
+
+    # One L2-normalised chroma vector per window, then a cosine self-similarity matrix.
+    windows = np.zeros((n_windows, 12), dtype=np.float64)
+    for index in range(n_windows):
+        block = chroma_frames[index * frames_per_window : (index + 1) * frames_per_window]
+        vector = block.mean(axis=0)
+        norm = float(np.linalg.norm(vector))
+        windows[index] = vector / norm if norm else vector
+    ssm = windows @ windows.T
+
+    half = min(n_windows // 2, max(1, int(round(kernel_seconds / window_seconds / 2.0))))
+    kernel = _checkerboard_kernel(np, half)
+    offsets = np.arange(-half, half)
+    denom = float(np.abs(kernel).sum())
+    novelty = np.zeros(n_windows, dtype=np.float64)
+    # Only score windows where the full kernel fits; partial kernels at the very start/end
+    # produce spurious novelty spikes that would swamp the real interior boundaries.
+    for i in range(half, n_windows - half):
+        picked = i + offsets
+        novelty[i] = float((kernel * ssm[np.ix_(picked, picked)]).sum()) / denom
+
+    span = float(novelty.max() - novelty.min())
+    normalised = (novelty - novelty.min()) / span if span else np.zeros_like(novelty)
+
+    # Peak-pick the novelty curve into boundary windows.
+    min_gap = max(1, int(round(min_segment_seconds / window_seconds)))
+    peaks: list[int] = []
+    for i in range(n_windows):
+        lo = max(0, i - 1)
+        hi = min(n_windows, i + 2)
+        if normalised[i] < normalised[lo:hi].max() or normalised[i] < threshold:
+            continue
+        if peaks and i - peaks[-1] < min_gap:
+            if normalised[i] > normalised[peaks[-1]]:
+                peaks[-1] = i
+            continue
+        peaks.append(i)
+
+    boundaries = [0.0]
+    for peak in peaks:
+        time = round(peak * window_seconds, 3)
+        if time - boundaries[-1] >= min_segment_seconds and duration - time >= min_segment_seconds:
+            boundaries.append(time)
+    boundaries.append(round(duration, 3))
+
+    window_segments = [
+        (int(round(boundaries[i] / window_seconds)), int(round(boundaries[i + 1] / window_seconds)))
+        for i in range(len(boundaries) - 1)
+    ]
+    labels = _label_segments(np, window_segments, windows, label_threshold)
+    segments = [
+        {
+            "start_seconds": boundaries[i],
+            "end_seconds": boundaries[i + 1],
+            "label": labels[i],
+        }
+        for i in range(len(boundaries) - 1)
+    ]
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "segments": segments,
+        "boundaries_seconds": boundaries,
+        "segment_count": len(segments),
+        "labels": labels,
+        "window_seconds": window_seconds,
+        "sample_rate": sample_rate,
+        "duration_seconds": round(duration, 3),
+        "method": "chroma-ssm-foote-novelty",
+    }
