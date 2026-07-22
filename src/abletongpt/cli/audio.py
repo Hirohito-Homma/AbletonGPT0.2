@@ -4,6 +4,8 @@
     python -m abletongpt.cli.audio tempo --file loop.wav --min-bpm 80 --max-bpm 160 --json
     python -m abletongpt.cli.audio key --file loop.wav
     python -m abletongpt.cli.audio key --file loop.wav --json
+    python -m abletongpt.cli.audio chords --file loop.wav
+    python -m abletongpt.cli.audio chords --file loop.wav --window-seconds 0.25 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -18,7 +20,7 @@ import argparse
 import json
 import sys
 
-from ..audio import AudioDependencyError, estimate_key, estimate_tempo
+from ..audio import AudioDependencyError, estimate_chords, estimate_key, estimate_tempo
 
 
 def _print_tempo(result: dict, *, as_json: bool) -> None:
@@ -70,6 +72,32 @@ def _cmd_tempo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_chords(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "progression: %s   (%g s @ %d Hz, %g s windows)   [%s]"
+        % (
+            " ".join(result["progression"]) or "(none)",
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["window_seconds"],
+            result["method"],
+        )
+    )
+    for segment in result["chords"]:
+        print(
+            "  %6.2f - %6.2f s  %-4s  (%.2f)"
+            % (
+                segment["start_seconds"],
+                segment["end_seconds"],
+                segment["chord"],
+                segment["confidence"],
+            )
+        )
+
+
 def _cmd_key(args: argparse.Namespace) -> int:
     try:
         result = estimate_key(args.file)
@@ -80,6 +108,19 @@ def _cmd_key(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_key(result, as_json=args.json)
+    return 0
+
+
+def _cmd_chords(args: argparse.Namespace) -> int:
+    try:
+        result = estimate_chords(args.file, window_seconds=args.window_seconds)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_chords(result, as_json=args.json)
     return 0
 
 
@@ -105,6 +146,18 @@ def build_parser() -> argparse.ArgumentParser:
     key.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
     key.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     key.set_defaults(func=_cmd_key)
+
+    chords = sub.add_parser("chords", help="Extract a chord progression from an audio file.")
+    chords.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    chords.add_argument(
+        "--window-seconds",
+        type=float,
+        default=0.5,
+        dest="window_seconds",
+        help="Analysis window length in seconds (chord time resolution).",
+    )
+    chords.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    chords.set_defaults(func=_cmd_chords)
 
     return parser
 

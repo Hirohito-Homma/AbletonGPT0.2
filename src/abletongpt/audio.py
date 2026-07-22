@@ -151,6 +151,46 @@ def _pearson(np, a, b) -> float:
     return float((a * b).sum() / denom) if denom else 0.0
 
 
+def _chromagram(np, file_path: str, frame_size: int, min_freq: float, max_freq: float):
+    """Return ``(chroma_frames, hop, sample_rate, signal_size)`` for a file.
+
+    ``chroma_frames`` is an ``(n_frames, 12)`` float array: one 12-bin pitch-class energy
+    vector per Hann-windowed FFT frame, each magnitude bin folded into its nearest pitch
+    class. Shared by :func:`estimate_key` (which sums over time) and :func:`estimate_chords`
+    (which tracks the chroma over time). Validates its DSP arguments and the audio length.
+    """
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if not 0.0 < min_freq < max_freq:
+        raise ValueError("require 0 < min_freq < max_freq")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for analysis (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+
+    # Precompute the FFT-bin -> pitch-class map for the usable frequency band.
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    band = (freqs >= min_freq) & (freqs <= min(max_freq, sample_rate / 2.0))
+    if not np.any(band):
+        raise ValueError("no FFT bins fall inside the requested frequency band")
+    with np.errstate(divide="ignore"):
+        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0.0, freqs, 1.0) / 440.0)
+    pitch_class = np.mod(np.rint(midi).astype(int), 12)
+    band_pc = pitch_class[band]
+
+    window = np.hanning(frame_size)
+    hop = frame_size // 2
+    rows = []
+    for start in range(0, signal.size - frame_size + 1, hop):
+        frame = signal[start : start + frame_size] * window
+        magnitude = np.abs(np.fft.rfft(frame))
+        rows.append(np.bincount(band_pc, weights=magnitude[band], minlength=12))
+    chroma_frames = np.asarray(rows, dtype=np.float64) if rows else np.zeros((0, 12))
+    return chroma_frames, hop, sample_rate, int(signal.size)
+
+
 def estimate_key(
     file_path: str,
     *,
@@ -166,37 +206,11 @@ def estimate_key(
     the key. Read-only; never touches Live.
     """
     np = _require_numpy()
-    if frame_size < 512 or frame_size & (frame_size - 1):
-        raise ValueError("frame_size must be a power of two of at least 512")
-    if not 0.0 < min_freq < max_freq:
-        raise ValueError("require 0 < min_freq < max_freq")
+    chroma_frames, _hop, sample_rate, signal_size = _chromagram(
+        np, file_path, frame_size, min_freq, max_freq
+    )
 
-    signal, sample_rate = _read_mono(Path(file_path))
-    if signal.size < sample_rate:
-        raise ValueError("audio is too short for key estimation (need at least ~1 second)")
-    if signal.size < frame_size:
-        raise ValueError("audio is shorter than one analysis frame")
-
-    # Precompute the FFT-bin -> pitch-class map for the usable frequency band.
-    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
-    band = (freqs >= min_freq) & (freqs <= min(max_freq, sample_rate / 2.0))
-    if not np.any(band):
-        raise ValueError("no FFT bins fall inside the requested frequency band")
-    with np.errstate(divide="ignore"):
-        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0.0, freqs, 1.0) / 440.0)
-    pitch_class = np.mod(np.rint(midi).astype(int), 12)
-
-    # Hann-windowed overlapping frames, magnitude spectrum summed into 12 pitch classes.
-    window = np.hanning(frame_size)
-    hop = frame_size // 2
-    chroma = np.zeros(12, dtype=np.float64)
-    for start in range(0, signal.size - frame_size + 1, hop):
-        frame = signal[start : start + frame_size] * window
-        magnitude = np.abs(np.fft.rfft(frame))
-        chroma += np.bincount(
-            pitch_class[band], weights=magnitude[band], minlength=12
-        )
-
+    chroma = chroma_frames.sum(axis=0)
     if not np.any(chroma):
         raise ValueError("audio has no tonal content for key estimation")
     chroma_norm = chroma / chroma.sum()
@@ -224,6 +238,120 @@ def estimate_key(
         "alternative_confidence": round(max(0.0, min(1.0, alt_corr)), 4),
         "chroma": [round(float(value), 4) for value in chroma_norm],
         "sample_rate": sample_rate,
-        "duration_seconds": round(signal.size / sample_rate, 3),
+        "duration_seconds": round(signal_size / sample_rate, 3),
         "method": "chroma-krumhansl-schmuckler",
+    }
+
+
+# Chord templates: interval sets relative to the root, index 0 == root. Kept to the two
+# common triad qualities so the label set stays small and the matcher stays robust.
+_CHORD_QUALITIES = (("", (0, 4, 7)), ("m", (0, 3, 7)))
+
+
+def _chord_templates(np):
+    """Return ``[(label, unit_template_vector)]`` for every root x quality triad."""
+    templates = []
+    for root in range(12):
+        for suffix, intervals in _CHORD_QUALITIES:
+            vector = np.zeros(12, dtype=np.float64)
+            for interval in intervals:
+                vector[(root + interval) % 12] = 1.0
+            templates.append(("%s%s" % (_NOTE_NAMES[root], suffix), vector))
+    return templates
+
+
+def estimate_chords(
+    file_path: str,
+    *,
+    frame_size: int = 4096,
+    window_seconds: float = 0.5,
+    min_freq: float = 55.0,
+    max_freq: float = 5000.0,
+    silence_ratio: float = 0.05,
+) -> dict[str, Any]:
+    """Extract a chord progression from an audio file, offline and deterministically.
+
+    Method: the shared DFT chromagram is averaged into ``window_seconds`` windows; each
+    window's chroma is matched (Pearson correlation) against the 24 major/minor triad
+    templates, and consecutive equal labels are merged into timed segments. Windows quieter
+    than ``silence_ratio`` of the loudest window are labelled ``"N"`` (no chord). This is a
+    lightweight triad recogniser, not a full functional-harmony analysis. Read-only.
+    """
+    np = _require_numpy()
+    if not 0.05 <= window_seconds <= 10.0:
+        raise ValueError("window_seconds must be between 0.05 and 10")
+    if not 0.0 <= silence_ratio < 1.0:
+        raise ValueError("silence_ratio must be in [0, 1)")
+
+    chroma_frames, hop, sample_rate, signal_size = _chromagram(
+        np, file_path, frame_size, min_freq, max_freq
+    )
+    if chroma_frames.shape[0] == 0 or not np.any(chroma_frames):
+        raise ValueError("audio has no tonal content for chord extraction")
+
+    # Assign each frame to a window by the time of its centre, then average per window.
+    frames_per_window = max(1, int(round(window_seconds * sample_rate / hop)))
+    n_windows = int(np.ceil(chroma_frames.shape[0] / frames_per_window))
+    templates = _chord_templates(np)
+
+    window_labels: list[str] = []
+    window_confidences: list[float] = []
+    window_strengths = np.zeros(n_windows, dtype=np.float64)
+    window_chroma = []
+    for index in range(n_windows):
+        block = chroma_frames[index * frames_per_window : (index + 1) * frames_per_window]
+        mean = block.mean(axis=0)
+        window_strengths[index] = float(mean.sum())
+        window_chroma.append(mean)
+
+    peak_strength = float(window_strengths.max())
+    silence_floor = peak_strength * silence_ratio
+    for index in range(n_windows):
+        mean = window_chroma[index]
+        if window_strengths[index] <= silence_floor or not np.any(mean):
+            window_labels.append("N")
+            window_confidences.append(0.0)
+            continue
+        unit = mean / mean.sum()
+        best_label, best_corr = "N", -2.0
+        for label, template in templates:
+            corr = _pearson(np, unit, template)
+            if corr > best_corr:
+                best_label, best_corr = label, corr
+        window_labels.append(best_label)
+        window_confidences.append(round(max(0.0, min(1.0, best_corr)), 4))
+
+    # Merge consecutive equal labels into timed segments.
+    seconds_per_window = frames_per_window * hop / sample_rate
+    segments: list[dict[str, Any]] = []
+    for index, label in enumerate(window_labels):
+        start = round(index * seconds_per_window, 3)
+        end = round(min((index + 1) * seconds_per_window, signal_size / sample_rate), 3)
+        if segments and segments[-1]["chord"] == label:
+            segments[-1]["end_seconds"] = end
+            segments[-1]["_confidences"].append(window_confidences[index])
+        else:
+            segments.append(
+                {
+                    "chord": label,
+                    "start_seconds": start,
+                    "end_seconds": end,
+                    "_confidences": [window_confidences[index]],
+                }
+            )
+    for segment in segments:
+        confidences = segment.pop("_confidences")
+        segment["confidence"] = round(sum(confidences) / len(confidences), 4)
+
+    progression = [segment["chord"] for segment in segments if segment["chord"] != "N"]
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "chords": segments,
+        "progression": progression,
+        "window_seconds": round(seconds_per_window, 4),
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal_size / sample_rate, 3),
+        "method": "chroma-triad-template-matching",
     }
