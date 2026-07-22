@@ -30,6 +30,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .reference import build_reference_comparison
 from .snapshots import build_snapshot, diff_snapshots
+from .targets import get_target, list_targets
 from .transcription import (
     build_locators_from_structure,
     build_midi_from_chords,
@@ -137,6 +138,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
             "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with a 0-100 match score and plain-language guidance (requires the audio extra: NumPy)",
+            "built-in genre mix/master targets to compare a mix against without a reference track (loudness + band balance; requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -489,6 +491,29 @@ def compare_mix_to_reference(mix_path: str, reference_path: str) -> dict[str, An
     return build_reference_comparison(
         _audio_reference_profile(mix_path),
         _audio_reference_profile(reference_path),
+    )
+
+
+@mcp.tool()
+def list_mix_targets() -> dict[str, Any]:
+    """組み込みのジャンル別ミックス/マスターtarget一覧を返す(streaming/modern-pop/edm/hip-hop/rock/
+    acoustic/jazz/classical/podcast)。各targetは規範的な近似(LUFS/LRA/True Peak/Crest+5帯域バランス)。
+    リファレンス曲を持っていなくてもcompare_mix_to_targetの比較先に使える。読み取り専用・NumPy不要。"""
+    return {"read_only": True, "targets": list_targets()}
+
+
+@mcp.tool()
+def compare_mix_to_target(mix_path: str, target: str) -> dict[str, Any]:
+    """自分のミックス(WAV/AIFF)を、組み込みのジャンル別target(list_mix_targetsで一覧)と比較する。
+    ラウドネス(LUFS/LRA/True Peak/Crest)と5帯域バランスの差分・平易なガイダンス・マッチスコア(0-100)を返す。
+    targetは近似カーブなので方向性の目安として使うこと(適用はしない)。読み取り専用・NumPy必須。"""
+    try:
+        target_profile = get_target(target)
+    except KeyError as error:
+        return {"read_only": True, "error": str(error), "targets": list_targets()}
+    return build_reference_comparison(
+        _audio_reference_profile(mix_path),
+        target_profile,
     )
 
 
