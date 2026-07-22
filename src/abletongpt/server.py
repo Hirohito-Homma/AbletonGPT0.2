@@ -47,7 +47,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
-            "read-only expressive-performance planning for a MIDI clip (accent/swing/humanize/probability/CC automation)",
+            "expressive-performance planning for a MIDI clip and applying it to the clip notes (accent/swing/humanize/probability; CC automation is plan-only for now)",
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
@@ -229,6 +229,54 @@ def plan_expression(
         automation_resolution_beats=automation_resolution_beats,
         seed=seed,
     )
+
+
+@mcp.tool()
+def apply_expression(
+    track_index: int,
+    clip_index: int,
+    accent: float = 0.0,
+    swing: float = 0.0,
+    humanize: float = 0.0,
+    weak_beat_probability: float = 1.0,
+    beats_per_bar: int = 4,
+    grid_beats: float = 0.5,
+    seed: int = 0,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_expressionで確認した表情付けを、既存MIDIクリップのノートへ適用する。ノート数は不変で、LiveのUndoで戻せる。CCオートメーションの書き戻しはまだ対象外。expected_source_fingerprintを渡すと、確認後にクリップが変わっていた場合は適用を拒否する。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_expression_plan(
+        clip_data,
+        accent=accent,
+        swing=swing,
+        humanize=humanize,
+        weak_beat_probability=weak_beat_probability,
+        beats_per_bar=beats_per_bar,
+        grid_beats=grid_beats,
+        seed=seed,
+    )
+    fingerprint = plan["source"]["fingerprint"]
+    if expected_source_fingerprint and expected_source_fingerprint != fingerprint:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["source"]["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "source": plan["source"],
+        "settings": plan["settings"],
+        "diff": plan["diff"],
+        "applied": applied,
+        "next_step": "クリップを再生して表情を確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
 
 
 @mcp.tool()

@@ -163,9 +163,14 @@ codex mcp add abletongpt -- /absolute/path/to/repository/.venv/bin/abletongpt
 
 現在のコンテキスト作曲はMIDIクリップが対象です。音声トラックからキー、BPM、コード、メロディを抽出する機能は、LUFS解析とは別の音響解析として今後追加します。
 
-### 既存クリップの表情付け（プランのみ）
+### 既存クリップの表情付け
 
-既存MIDIクリップに、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率・MIDI CCオートメーション曲線（ramp/arch/sine）を**決定論的に**与える計画を、`plan_expression`で**読み取り専用**に取得できます（ノート数は不変）。実際にクリップへ書き戻す`apply_expression`は後続で追加予定です。同じロジックはCLI [`abletongpt-cli expression`](docs/CLI_ENGINES_JA.md) でも使えます。
+既存MIDIクリップに、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率・MIDI CCオートメーション曲線（ramp/arch/sine）を**決定論的に**与えます。
+
+1. `plan_expression`で表情付けの計画を**読み取り専用**に取得して確認する（ノート数は不変）。
+2. `apply_expression`で、確認した表情を既存クリップのノートへ適用する。`expected_source_fingerprint`を渡せば、確認後にクリップが変わっていた場合は適用を拒否できる。適用は**LiveのUndoで戻せます**。
+
+`apply_expression`はノート（ベロシティ/タイミング/確率）の差し替えのみを行い、**MIDI CCオートメーションの書き戻しは現時点では対象外**です（プランには含まれます。公開LOMに安定したCCエンベロープ書き込みAPIが無いため、別途対応予定）。同じ表情付けロジックはCLI [`abletongpt-cli expression`](docs/CLI_ENGINES_JA.md) でも計画として使えます。
 
 ### AIボーカル
 
