@@ -93,7 +93,8 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "collision-safe Session-to-Arrangement clip and scene copy",
             "read-only Session and Arrangement audio source-path inspection",
             "non-destructive normalized mix-state snapshots and snapshot diffing",
-            "read-only Live browser navigation for presets and kits (never loads or inserts)",
+            "read-only Live browser navigation for presets and kits",
+            "loading a browsed preset/kit onto a track (additive; refuses tracks that already have an instrument)",
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
@@ -789,6 +790,36 @@ def browse_device_presets(
         category=category,
         path=list(path or []),
         max_items=max_items,
+    )
+
+
+@mcp.tool()
+def load_browser_preset(
+    track_index: int,
+    category: str,
+    name: str,
+    path: list[str] | None = None,
+) -> dict[str, Any]:
+    """browse_device_presetsで見つけたプリセット／キットを、指定トラックへLiveブラウザからロードするMutation。
+    categoryとpath（フォルダ名列）で場所を特定し、そのフォルダ直下のnameという読み込み可能項目をロードする。
+    安全のため、既にインストゥルメントを持つトラックへのロードは拒否する（既存楽器を置き換えない・追加のみ）。
+    1回1トラック。まずbrowse_device_presetsでname/pathを確認すること。"""
+    if track_index < 0:
+        raise ValueError("track_index must be non-negative")
+    if category not in _BROWSER_CATEGORIES:
+        raise ValueError("category must be one of: %s" % ", ".join(_BROWSER_CATEGORIES))
+    if not name.strip() or len(name) > 300:
+        raise ValueError("name must contain 1 to 300 characters")
+    if path is not None and (
+        not isinstance(path, list) or any(not isinstance(segment, str) for segment in path)
+    ):
+        raise ValueError("path must be a list of folder-name strings")
+    return bridge.call(
+        "load_preset",
+        track_index=track_index,
+        category=category,
+        path=list(path or []),
+        name=name.strip(),
     )
 
 
