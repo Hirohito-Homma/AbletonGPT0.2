@@ -26,6 +26,7 @@ from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
+from .reference import build_reference_comparison
 from .snapshots import build_snapshot, diff_snapshots
 from .transcription import (
     build_locators_from_structure,
@@ -131,6 +132,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
+            "offline mix-vs-reference comparison (loudness + tone) with plain-language guidance (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -440,6 +442,32 @@ def analyze_audio_spectral(file_path: str, rolloff_percent: float = 0.85) -> dic
     """WAV/AIFFを変更せず、音色のスペクトル特徴(セントロイド=明るさ・バンド幅・ロールオフ・フラットネス・
     ゼロ交差率・RMS)をオフライン抽出する。有音フレームで平均/標準偏差/最小/最大を集計。NumPy必須。読み取り専用。"""
     return extract_spectral_features(file_path, rolloff_percent=rolloff_percent)
+
+
+def _audio_reference_profile(file_path: str) -> dict[str, Any]:
+    """Flatten a file's loudness + spectral analysis into the fields the comparator needs."""
+    measurements = analyze_loudness_file(file_path)["measurements"]
+    features = extract_spectral_features(file_path)["features"]
+    return {
+        "file": file_path,
+        "integrated_lufs": measurements["integrated_lufs"],
+        "loudness_range_lu": measurements["loudness_range_lu"],
+        "true_peak_dbtp": measurements["true_peak_dbtp"],
+        "crest_factor_db": measurements["crest_factor_db"],
+        "centroid_hz": features["spectral_centroid_hz"]["mean"],
+        "rolloff_hz": features["spectral_rolloff_hz"]["mean"],
+    }
+
+
+@mcp.tool()
+def compare_mix_to_reference(mix_path: str, reference_path: str) -> dict[str, Any]:
+    """自分のミックスとリファレンス曲(WAV/AIFF)を、ラウドネス(LUFS/LRA/True Peak/Crest)と音色(明るさ/ロールオフ)で
+    比較し、差分と平易なガイダンス(例:「リファレンスより2LU静かで明るい」)を返す。ゲイン変更等の適用はしない(解析のみ)。
+    読み取り専用。NumPy必須。"""
+    return build_reference_comparison(
+        _audio_reference_profile(mix_path),
+        _audio_reference_profile(reference_path),
+    )
 
 
 @mcp.tool()

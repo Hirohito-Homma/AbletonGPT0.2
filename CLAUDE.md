@@ -73,6 +73,10 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   detected onset times and reports how well they align (markers-on-transients, onset coverage,
   offset stats). Pure, stdlib-only. Warp-marker *writing* is not exposed by the Live API, so this
   stays read-only (report only).
+- **`reference.py`** — `build_reference_comparison` compares two audio *profiles* (loudness + tone
+  numbers) and returns mix-minus-reference deltas plus plain-language mixing guidance. Pure,
+  stdlib-only; the server tool builds the profiles from `loudness.py` + `audio.py` and never
+  applies a change (report only).
 
 ## Two separate ports — do not confuse them
 
