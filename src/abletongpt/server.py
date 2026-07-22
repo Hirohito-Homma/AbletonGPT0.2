@@ -30,6 +30,7 @@ from .extensions_bridge import ExtensionsBridge
 from .groove import build_velocity_groove_plan
 from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
+from .layering import build_layering_plan
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
 from .phrase import build_phrase_from_loop
@@ -158,6 +159,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
+            "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -1601,6 +1603,68 @@ def create_phrase_from_loop(
         "destination_clip_index": destination_clip_index,
         "created": created,
         "next_step": "生成したフレーズを再生して確認してください。元ループは変更していません。",
+    }
+
+
+def _layering_tracks(track_roles: list[str] | None) -> list[dict[str, Any]]:
+    """Read the set's tracks from get_state, applying optional per-track role overrides."""
+    state = bridge.call("get_state")
+    tracks = state.get("tracks", [])
+    if not tracks:
+        raise ValueError("the Live set has no tracks")
+    overrides = list(track_roles) if track_roles else []
+    if overrides and len(overrides) != len(tracks):
+        raise ValueError(
+            "track_roles has %d entries but the set has %d tracks" % (len(overrides), len(tracks))
+        )
+    resolved = []
+    for position, track in enumerate(tracks):
+        role = overrides[position].strip() if position < len(overrides) else ""
+        entry = {"index": int(track["index"]), "name": str(track.get("name", ""))}
+        if role:
+            entry["role"] = role
+        resolved.append(entry)
+    return resolved
+
+
+@mcp.tool()
+def plan_section_layers(
+    structure: list[str],
+    track_roles: list[str] | None = None,
+) -> dict[str, Any]:
+    """Liveを変更せず、曲構造(セクションのラベル列)に沿って各トラックのオン/ミュートのレイヤー計画を作る。
+    各トラックのロールは名前から自動推定(drums/bass/chords/lead/pad/vocal/fx/perc。track_rolesで上書き可、
+    トラック数と同数の配列)。intro=薄く、build=積み上げ、chorus/drop=フル、breakdown=ドラム/ベース抜き等の
+    定石でセクションごとのactive/muted一覧を返す。適用はapply_section_layer。読み取り専用・NumPy不要。"""
+    tracks = _layering_tracks(track_roles)
+    return build_layering_plan(list(structure), tracks)
+
+
+@mcp.tool()
+def apply_section_layer(
+    structure: list[str],
+    section_index: int,
+    track_roles: list[str] | None = None,
+) -> dict[str, Any]:
+    """plan_section_layersのうち指定した1セクション(section_index)のレイヤーに合わせて、各トラックのMuteを設定する
+    (そのセクションで鳴らないトラックをMute、鳴るトラックをUnmute)。トラックの追加/削除やクリップ変更はしない。
+    Muteの切替のみで簡単に元へ戻せる。structure/track_rolesはplan_section_layersと同じ。"""
+    tracks = _layering_tracks(track_roles)
+    plan = build_layering_plan(list(structure), tracks)
+    if not 0 <= section_index < len(plan["sections"]):
+        raise ValueError("section_index is outside the structure (0..%d)" % (len(plan["sections"]) - 1))
+    section = plan["sections"][section_index]
+    muted: list[str] = []
+    unmuted: list[str] = []
+    for layer in section["layers"]:
+        should_mute = not layer["active"]
+        bridge.call("set_track_mute", track_index=layer["track_index"], muted=should_mute)
+        (muted if should_mute else unmuted).append(layer["name"])
+    return {
+        "section": {"position": section["position"], "label": section["label"], "archetype": section["archetype"]},
+        "unmuted_tracks": unmuted,
+        "muted_tracks": muted,
+        "next_step": "再生してレイヤーを確認してください。Muteを戻せば元の状態に戻せます。",
     }
 
 

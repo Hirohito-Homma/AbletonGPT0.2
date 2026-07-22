@@ -146,6 +146,12 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   pair writes the result into an **empty** slot via the non-overwriting `create_midi_clip` (refuses
   occupied slots) with a source-fingerprint guard. Works on the user's own material — distinct from
   `create_part_variation` (regenerates a part from scratch with a new seed). Pure, stdlib-only.
+- **`layering.py`** — `build_layering_plan(structure, tracks)` decides which tracks play in each
+  song section by mapping the section label to an arrangement archetype (intro/verse/build/chorus/
+  bridge/breakdown/outro → a set of active roles) and each track to a role (`infer_track_role` by
+  name keyword). Read-only plan. The `plan_section_layers` tool builds it from `get_state`;
+  `apply_section_layer` sets each track's mute to match one chosen section via `set_track_mute`
+  (mute toggles only — trivially reversible, no track/clip changes). Pure, stdlib-only.
 
 ## Two separate ports — do not confuse them
 
