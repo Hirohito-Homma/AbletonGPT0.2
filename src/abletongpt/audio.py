@@ -151,6 +151,46 @@ def _pearson(np, a, b) -> float:
     return float((a * b).sum() / denom) if denom else 0.0
 
 
+def _chromagram(np, file_path: str, frame_size: int, min_freq: float, max_freq: float):
+    """Return ``(chroma_frames, hop, sample_rate, signal_size)`` for a file.
+
+    ``chroma_frames`` is an ``(n_frames, 12)`` float array: one 12-bin pitch-class energy
+    vector per Hann-windowed FFT frame, each magnitude bin folded into its nearest pitch
+    class. Shared by :func:`estimate_key` (which sums over time) and :func:`estimate_chords`
+    (which tracks the chroma over time). Validates its DSP arguments and the audio length.
+    """
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if not 0.0 < min_freq < max_freq:
+        raise ValueError("require 0 < min_freq < max_freq")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for analysis (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+
+    # Precompute the FFT-bin -> pitch-class map for the usable frequency band.
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    band = (freqs >= min_freq) & (freqs <= min(max_freq, sample_rate / 2.0))
+    if not np.any(band):
+        raise ValueError("no FFT bins fall inside the requested frequency band")
+    with np.errstate(divide="ignore"):
+        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0.0, freqs, 1.0) / 440.0)
+    pitch_class = np.mod(np.rint(midi).astype(int), 12)
+    band_pc = pitch_class[band]
+
+    window = np.hanning(frame_size)
+    hop = frame_size // 2
+    rows = []
+    for start in range(0, signal.size - frame_size + 1, hop):
+        frame = signal[start : start + frame_size] * window
+        magnitude = np.abs(np.fft.rfft(frame))
+        rows.append(np.bincount(band_pc, weights=magnitude[band], minlength=12))
+    chroma_frames = np.asarray(rows, dtype=np.float64) if rows else np.zeros((0, 12))
+    return chroma_frames, hop, sample_rate, int(signal.size)
+
+
 def estimate_key(
     file_path: str,
     *,
@@ -166,37 +206,11 @@ def estimate_key(
     the key. Read-only; never touches Live.
     """
     np = _require_numpy()
-    if frame_size < 512 or frame_size & (frame_size - 1):
-        raise ValueError("frame_size must be a power of two of at least 512")
-    if not 0.0 < min_freq < max_freq:
-        raise ValueError("require 0 < min_freq < max_freq")
+    chroma_frames, _hop, sample_rate, signal_size = _chromagram(
+        np, file_path, frame_size, min_freq, max_freq
+    )
 
-    signal, sample_rate = _read_mono(Path(file_path))
-    if signal.size < sample_rate:
-        raise ValueError("audio is too short for key estimation (need at least ~1 second)")
-    if signal.size < frame_size:
-        raise ValueError("audio is shorter than one analysis frame")
-
-    # Precompute the FFT-bin -> pitch-class map for the usable frequency band.
-    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
-    band = (freqs >= min_freq) & (freqs <= min(max_freq, sample_rate / 2.0))
-    if not np.any(band):
-        raise ValueError("no FFT bins fall inside the requested frequency band")
-    with np.errstate(divide="ignore"):
-        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0.0, freqs, 1.0) / 440.0)
-    pitch_class = np.mod(np.rint(midi).astype(int), 12)
-
-    # Hann-windowed overlapping frames, magnitude spectrum summed into 12 pitch classes.
-    window = np.hanning(frame_size)
-    hop = frame_size // 2
-    chroma = np.zeros(12, dtype=np.float64)
-    for start in range(0, signal.size - frame_size + 1, hop):
-        frame = signal[start : start + frame_size] * window
-        magnitude = np.abs(np.fft.rfft(frame))
-        chroma += np.bincount(
-            pitch_class[band], weights=magnitude[band], minlength=12
-        )
-
+    chroma = chroma_frames.sum(axis=0)
     if not np.any(chroma):
         raise ValueError("audio has no tonal content for key estimation")
     chroma_norm = chroma / chroma.sum()
@@ -224,6 +238,301 @@ def estimate_key(
         "alternative_confidence": round(max(0.0, min(1.0, alt_corr)), 4),
         "chroma": [round(float(value), 4) for value in chroma_norm],
         "sample_rate": sample_rate,
-        "duration_seconds": round(signal.size / sample_rate, 3),
+        "duration_seconds": round(signal_size / sample_rate, 3),
         "method": "chroma-krumhansl-schmuckler",
+    }
+
+
+# Chord templates: interval sets relative to the root, index 0 == root. Kept to the two
+# common triad qualities so the label set stays small and the matcher stays robust.
+_CHORD_QUALITIES = (("", (0, 4, 7)), ("m", (0, 3, 7)))
+
+
+def _chord_templates(np):
+    """Return ``[(label, unit_template_vector)]`` for every root x quality triad."""
+    templates = []
+    for root in range(12):
+        for suffix, intervals in _CHORD_QUALITIES:
+            vector = np.zeros(12, dtype=np.float64)
+            for interval in intervals:
+                vector[(root + interval) % 12] = 1.0
+            templates.append(("%s%s" % (_NOTE_NAMES[root], suffix), vector))
+    return templates
+
+
+def estimate_chords(
+    file_path: str,
+    *,
+    frame_size: int = 4096,
+    window_seconds: float = 0.5,
+    min_freq: float = 55.0,
+    max_freq: float = 5000.0,
+    silence_ratio: float = 0.05,
+) -> dict[str, Any]:
+    """Extract a chord progression from an audio file, offline and deterministically.
+
+    Method: the shared DFT chromagram is averaged into ``window_seconds`` windows; each
+    window's chroma is matched (Pearson correlation) against the 24 major/minor triad
+    templates, and consecutive equal labels are merged into timed segments. Windows quieter
+    than ``silence_ratio`` of the loudest window are labelled ``"N"`` (no chord). This is a
+    lightweight triad recogniser, not a full functional-harmony analysis. Read-only.
+    """
+    np = _require_numpy()
+    if not 0.05 <= window_seconds <= 10.0:
+        raise ValueError("window_seconds must be between 0.05 and 10")
+    if not 0.0 <= silence_ratio < 1.0:
+        raise ValueError("silence_ratio must be in [0, 1)")
+
+    chroma_frames, hop, sample_rate, signal_size = _chromagram(
+        np, file_path, frame_size, min_freq, max_freq
+    )
+    if chroma_frames.shape[0] == 0 or not np.any(chroma_frames):
+        raise ValueError("audio has no tonal content for chord extraction")
+
+    # Assign each frame to a window by the time of its centre, then average per window.
+    frames_per_window = max(1, int(round(window_seconds * sample_rate / hop)))
+    n_windows = int(np.ceil(chroma_frames.shape[0] / frames_per_window))
+    templates = _chord_templates(np)
+
+    window_labels: list[str] = []
+    window_confidences: list[float] = []
+    window_strengths = np.zeros(n_windows, dtype=np.float64)
+    window_chroma = []
+    for index in range(n_windows):
+        block = chroma_frames[index * frames_per_window : (index + 1) * frames_per_window]
+        mean = block.mean(axis=0)
+        window_strengths[index] = float(mean.sum())
+        window_chroma.append(mean)
+
+    peak_strength = float(window_strengths.max())
+    silence_floor = peak_strength * silence_ratio
+    for index in range(n_windows):
+        mean = window_chroma[index]
+        if window_strengths[index] <= silence_floor or not np.any(mean):
+            window_labels.append("N")
+            window_confidences.append(0.0)
+            continue
+        unit = mean / mean.sum()
+        best_label, best_corr = "N", -2.0
+        for label, template in templates:
+            corr = _pearson(np, unit, template)
+            if corr > best_corr:
+                best_label, best_corr = label, corr
+        window_labels.append(best_label)
+        window_confidences.append(round(max(0.0, min(1.0, best_corr)), 4))
+
+    # Merge consecutive equal labels into timed segments.
+    seconds_per_window = frames_per_window * hop / sample_rate
+    segments: list[dict[str, Any]] = []
+    for index, label in enumerate(window_labels):
+        start = round(index * seconds_per_window, 3)
+        end = round(min((index + 1) * seconds_per_window, signal_size / sample_rate), 3)
+        if segments and segments[-1]["chord"] == label:
+            segments[-1]["end_seconds"] = end
+            segments[-1]["_confidences"].append(window_confidences[index])
+        else:
+            segments.append(
+                {
+                    "chord": label,
+                    "start_seconds": start,
+                    "end_seconds": end,
+                    "_confidences": [window_confidences[index]],
+                }
+            )
+    for segment in segments:
+        confidences = segment.pop("_confidences")
+        segment["confidence"] = round(sum(confidences) / len(confidences), 4)
+
+    progression = [segment["chord"] for segment in segments if segment["chord"] != "N"]
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "chords": segments,
+        "progression": progression,
+        "window_seconds": round(seconds_per_window, 4),
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal_size / sample_rate, 3),
+        "method": "chroma-triad-template-matching",
+    }
+
+
+def _note_name(midi: int) -> str:
+    """MIDI number -> scientific pitch name, e.g. 60 -> ``C4`` (A4 = 69 = 440 Hz)."""
+    return "%s%d" % (_NOTE_NAMES[midi % 12], midi // 12 - 1)
+
+
+def _yin_pitch(np, frame, min_lag: int, max_lag: int, threshold: float):
+    """One frame's fundamental via the YIN difference function.
+
+    Returns ``(f0_lag, aperiodicity)`` where ``f0_lag`` is the (parabolically refined) lag in
+    samples of the fundamental period and ``aperiodicity`` is YIN's ``d'`` at that lag (lower
+    == more clearly pitched). ``f0_lag`` is ``None`` when no lag clears the threshold, which
+    marks the frame as unvoiced.
+    """
+    integration = frame.size - max_lag
+    if integration <= 0:
+        return None, 1.0
+    head = frame[:integration]
+    difference = np.empty(max_lag + 1, dtype=np.float64)
+    difference[0] = 0.0
+    for lag in range(1, max_lag + 1):
+        delta = head - frame[lag : lag + integration]
+        difference[lag] = float(np.dot(delta, delta))
+
+    # Cumulative mean normalised difference: this is what lets YIN reject the octave-below
+    # errors a plain autocorrelation makes.
+    lags = np.arange(1, max_lag + 1)
+    cumulative = np.cumsum(difference[1:])
+    normalised = np.ones(max_lag + 1, dtype=np.float64)
+    normalised[1:] = difference[1:] * lags / np.where(cumulative > 0.0, cumulative, 1e-12)
+
+    # Absolute threshold: the first dip below `threshold`, descended to its local minimum.
+    chosen = -1
+    lag = min_lag
+    while lag <= max_lag:
+        if normalised[lag] < threshold:
+            while lag + 1 <= max_lag and normalised[lag + 1] < normalised[lag]:
+                lag += 1
+            chosen = lag
+            break
+        lag += 1
+    voiced = chosen != -1
+    if not voiced:
+        chosen = min_lag + int(np.argmin(normalised[min_lag : max_lag + 1]))
+
+    refined = float(chosen)
+    if min_lag <= chosen < max_lag:
+        a, b, c = normalised[chosen - 1], normalised[chosen], normalised[chosen + 1]
+        denom = a - 2.0 * b + c
+        if denom != 0.0:
+            refined = chosen + max(-1.0, min(1.0, 0.5 * (a - c) / denom))
+
+    return (refined if voiced else None), float(normalised[chosen])
+
+
+def extract_melody(
+    file_path: str,
+    *,
+    frame_size: int = 2048,
+    hop: int = 512,
+    min_f0: float = 65.0,
+    max_f0: float = 1047.0,
+    threshold: float = 0.1,
+    silence_ratio: float = 0.05,
+    min_note_seconds: float = 0.05,
+) -> dict[str, Any]:
+    """Extract a monophonic melody (note sequence) from an audio file, offline.
+
+    Method: a self-written YIN pitch tracker estimates the fundamental of each Hann-windowed
+    frame (cumulative-mean-normalised difference function + absolute threshold + parabolic
+    interpolation), voiced frames are quantised to the nearest MIDI note, and consecutive
+    equal notes are merged into timed segments. Assumes a single melodic line -- it does not
+    resolve polyphony. Deterministic and read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if hop < 64 or hop > frame_size:
+        raise ValueError("hop must be between 64 and frame_size samples")
+    if not 0.0 < min_f0 < max_f0:
+        raise ValueError("require 0 < min_f0 < max_f0")
+    if not 0.0 < threshold < 1.0:
+        raise ValueError("threshold must be in (0, 1)")
+    if not 0.0 <= silence_ratio < 1.0:
+        raise ValueError("silence_ratio must be in [0, 1)")
+    if min_note_seconds < 0.0:
+        raise ValueError("min_note_seconds must not be negative")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for melody extraction (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+    if max_f0 >= sample_rate / 2.0:
+        raise ValueError("max_f0 must be below the Nyquist frequency")
+
+    min_lag = max(1, int(sample_rate / max_f0))
+    max_lag = int(sample_rate / min_f0)
+    if max_lag >= frame_size:
+        raise ValueError("frame_size is too small for the requested min_f0")
+
+    window = np.hanning(frame_size)
+    starts = range(0, signal.size - frame_size + 1, hop)
+    frame_rms = np.array(
+        [
+            float(np.sqrt(np.mean((signal[start : start + frame_size]) ** 2)))
+            for start in starts
+        ]
+    )
+    peak_rms = float(frame_rms.max()) if frame_rms.size else 0.0
+    silence_floor = peak_rms * silence_ratio
+
+    # Per-frame MIDI note (or None when unvoiced), with its voicing confidence.
+    frame_notes: list[int | None] = []
+    frame_conf: list[float] = []
+    for index, start in enumerate(starts):
+        if frame_rms[index] <= silence_floor:
+            frame_notes.append(None)
+            frame_conf.append(0.0)
+            continue
+        frame = signal[start : start + frame_size] * window
+        lag, aperiodicity = _yin_pitch(np, frame, min_lag, max_lag, threshold)
+        if lag is None:
+            frame_notes.append(None)
+            frame_conf.append(0.0)
+            continue
+        f0 = sample_rate / lag
+        midi = int(round(69.0 + 12.0 * np.log2(f0 / 440.0)))
+        frame_notes.append(midi)
+        frame_conf.append(round(max(0.0, min(1.0, 1.0 - aperiodicity)), 4))
+
+    # Merge consecutive equal notes into timed segments; unvoiced frames break the line.
+    hop_seconds = hop / sample_rate
+    duration = signal.size / sample_rate
+    raw: list[dict[str, Any]] = []
+    for index, midi in enumerate(frame_notes):
+        if midi is None:
+            continue
+        start = index * hop_seconds
+        end = min(duration, start + hop_seconds)
+        if raw and raw[-1]["midi"] == midi and abs(raw[-1]["end_seconds"] - start) < 1e-9:
+            raw[-1]["end_seconds"] = end
+            raw[-1]["_confidences"].append(frame_conf[index])
+        else:
+            raw.append(
+                {
+                    "midi": midi,
+                    "start_seconds": start,
+                    "end_seconds": end,
+                    "_confidences": [frame_conf[index]],
+                }
+            )
+
+    notes: list[dict[str, Any]] = []
+    for segment in raw:
+        confidences = segment.pop("_confidences")
+        if segment["end_seconds"] - segment["start_seconds"] < min_note_seconds:
+            continue
+        midi = segment["midi"]
+        notes.append(
+            {
+                "midi": midi,
+                "note": _note_name(midi),
+                "start_seconds": round(segment["start_seconds"], 3),
+                "end_seconds": round(segment["end_seconds"], 3),
+                "confidence": round(sum(confidences) / len(confidences), 4),
+            }
+        )
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "notes": notes,
+        "note_names": [note["note"] for note in notes],
+        "f0_range_hz": [min_f0, max_f0],
+        "frame_seconds": round(hop_seconds, 4),
+        "sample_rate": sample_rate,
+        "duration_seconds": round(duration, 3),
+        "method": "yin-monophonic-pitch",
     }

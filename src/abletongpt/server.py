@@ -10,7 +10,7 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
-from .audio import estimate_key, estimate_tempo
+from .audio import estimate_chords, estimate_key, estimate_tempo, extract_melody
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
@@ -99,6 +99,8 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF loudness analysis",
             "offline WAV/AIFF tempo (BPM) estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF key estimation (requires the audio extra: NumPy)",
+            "offline WAV/AIFF chord-progression extraction (requires the audio extra: NumPy)",
+            "offline WAV/AIFF monophonic melody extraction (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -358,6 +360,18 @@ def analyze_audio_tempo(
 def analyze_audio_key(file_path: str) -> dict[str, Any]:
     """WAV/AIFFを変更せず、キー(調)をオフライン推定する。NumPy(`abletongpt[audio]`)が必要。読み取り専用。"""
     return estimate_key(file_path)
+
+
+@mcp.tool()
+def analyze_audio_chords(file_path: str, window_seconds: float = 0.5) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、コード進行(メジャー/マイナー三和音)をオフライン抽出する。NumPy必須。読み取り専用。"""
+    return estimate_chords(file_path, window_seconds=window_seconds)
+
+
+@mcp.tool()
+def analyze_audio_melody(file_path: str, min_f0: float = 65.0, max_f0: float = 1047.0) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、単音メロディ(音符列)をYINでオフライン抽出する。単旋律前提。NumPy必須。読み取り専用。"""
+    return extract_melody(file_path, min_f0=min_f0, max_f0=max_f0)
 
 
 @mcp.tool()
