@@ -2,6 +2,7 @@
 
     python -m abletongpt.cli.expression --clip clip.json --accent 0.6 --swing 0.4
     python -m abletongpt.cli.expression --clip clip.json --humanize 0.3 --seed 7 --json
+    python -m abletongpt.cli.expression --clip clip.json --automation arch --automation-cc 11
 
 ``--clip`` points at a JSON file describing an existing MIDI clip -- a ``length_beats``
 number and a ``notes`` list of ``{pitch, start_time, duration, velocity}`` objects (the
@@ -18,7 +19,7 @@ import json
 import sys
 from pathlib import Path
 
-from ..expression import build_expression_plan
+from ..expression import AUTOMATION_SHAPES, build_expression_plan
 
 
 def _read_clip(path: str) -> dict:
@@ -67,6 +68,16 @@ def _print_plan(plan: dict, *, as_json: bool) -> None:
         )
     )
     print("min probability after: %g" % diff["probability"]["minimum_after"])
+    for envelope in plan["automation"]:
+        print(
+            "automation: CC%d %s  %s  %d points"
+            % (
+                envelope["controller"],
+                envelope.get("controller_name") or "",
+                envelope["shape"],
+                envelope["point_count"],
+            )
+        )
 
 
 def _cmd(args: argparse.Namespace) -> int:
@@ -80,6 +91,12 @@ def _cmd(args: argparse.Namespace) -> int:
             weak_beat_probability=args.weak_beat_probability,
             beats_per_bar=args.beats_per_bar,
             grid_beats=args.grid_beats,
+            automation_shape=args.automation,
+            automation_cc=args.automation_cc,
+            automation_depth=args.automation_depth,
+            automation_base=args.automation_base,
+            automation_cycles=args.automation_cycles,
+            automation_resolution_beats=args.automation_resolution,
             seed=args.seed,
         )
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -135,6 +152,47 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.5,
         dest="grid_beats",
         help="Swing/accent grid in beats, e.g. 0.5 for 8ths (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--automation",
+        default=None,
+        choices=list(AUTOMATION_SHAPES),
+        help="Also emit a MIDI CC envelope of this shape (default: none).",
+    )
+    parser.add_argument(
+        "--automation-cc",
+        type=int,
+        default=1,
+        dest="automation_cc",
+        help="MIDI CC controller number 0-127 (default: %(default)s = Mod Wheel).",
+    )
+    parser.add_argument(
+        "--automation-depth",
+        type=int,
+        default=64,
+        dest="automation_depth",
+        help="Envelope depth above base, 0-127 (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--automation-base",
+        type=int,
+        default=0,
+        dest="automation_base",
+        help="Envelope base value, 0-127 (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--automation-cycles",
+        type=int,
+        default=1,
+        dest="automation_cycles",
+        help="Cycles across the clip for the sine shape, 1-64 (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--automation-resolution",
+        type=float,
+        default=0.25,
+        dest="automation_resolution",
+        help="Breakpoint spacing in beats (default: %(default)s).",
     )
     parser.add_argument(
         "--seed", type=int, default=0, help="Deterministic seed (default: %(default)s)."
