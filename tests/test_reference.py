@@ -131,3 +131,58 @@ def test_stereo_absent_leaves_no_stereo_delta():
     report = build_reference_comparison(_profile(), _profile())
     assert "stereo_width" not in report["deltas"]
     assert "correlation" not in report["deltas"]
+
+
+# --- match score ---
+
+
+def _full_profile(**profile_kwargs):
+    profile = _profile(**profile_kwargs)
+    profile["bands"] = _bands()
+    profile["width_side_ratio"] = 0.3
+    profile["correlation"] = 0.8
+    return profile
+
+
+def test_identical_profiles_score_100():
+    report = build_reference_comparison(_full_profile(), _full_profile())
+
+    match = report["match"]
+    assert match["score"] == 100.0
+    assert match["verdict"] == "very close to the reference"
+    assert set(match["dimensions"]) == {"loudness", "dynamics", "tone", "band_balance", "stereo", "phase"}
+
+
+def test_large_loudness_gap_lowers_score_and_flags_dimension():
+    mix = _full_profile(lufs=-22.0)  # 8 LU quieter than the -14 reference
+    report = build_reference_comparison(mix, _full_profile())
+
+    match = report["match"]
+    assert match["score"] < 100.0
+    assert match["dimensions"]["loudness"] == 0.0  # 8 LU >= 6 LU scale -> full penalty
+    assert match["weakest_dimension"] == "loudness"
+
+
+def test_score_reflects_verdict_bands():
+    # A moderately different mix: a few dimensions off.
+    mix = _full_profile(lufs=-17.0, centroid=2600.0)
+    mix["bands"] = _bands(low=0.30, high=0.10)
+    report = build_reference_comparison(mix, _full_profile())
+
+    assert 0.0 <= report["match"]["score"] <= 100.0
+    assert report["match"]["verdict"] in {
+        "very close to the reference",
+        "close to the reference",
+        "moderately different from the reference",
+        "quite different from the reference",
+    }
+
+
+def test_score_uses_only_available_dimensions():
+    # Loudness-only profiles: score comes from loudness + dynamics + tone, no stereo/bands.
+    report = build_reference_comparison(_profile(), _profile())
+
+    dims = report["match"]["dimensions"]
+    assert "band_balance" not in dims
+    assert "stereo" not in dims
+    assert report["match"]["score"] == 100.0

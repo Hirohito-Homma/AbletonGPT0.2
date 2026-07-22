@@ -50,3 +50,6 @@ def test_compare_combines_loudness_tone_bands_and_stereo(monkeypatch):
     assert any("brighter" in note for note in report["guidance"])
     assert any("more low energy" in note for note in report["guidance"])
     assert any("wider" in note for note in report["guidance"])
+    # A single summary score across all measured dimensions.
+    assert 0.0 <= report["match"]["score"] <= 100.0
+    assert report["match"]["weakest_dimension"] in report["match"]["dimensions"]

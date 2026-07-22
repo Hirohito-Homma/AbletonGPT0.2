@@ -28,6 +28,87 @@ def _delta(mix_value: float | None, reference_value: float | None) -> float | No
     return round(float(mix_value) - float(reference_value), 4)
 
 
+def _closeness(delta: float | None, scale: float) -> float | None:
+    """Map a difference to a 0..1 closeness: 1 when identical, 0 at ``scale`` apart."""
+    if delta is None:
+        return None
+    return max(0.0, 1.0 - abs(delta) / scale)
+
+
+# Per-dimension weight in the overall match score.
+_DIMENSION_WEIGHTS = {
+    "loudness": 2.0,
+    "dynamics": 1.5,
+    "tone": 1.5,
+    "band_balance": 2.0,
+    "stereo": 1.0,
+    "phase": 1.0,
+}
+
+
+def _verdict(score: float | None) -> str:
+    if score is None:
+        return "not enough data to score"
+    if score >= 85.0:
+        return "very close to the reference"
+    if score >= 70.0:
+        return "close to the reference"
+    if score >= 50.0:
+        return "moderately different from the reference"
+    return "quite different from the reference"
+
+
+def _build_match(deltas: dict[str, Any], reference: dict[str, Any]) -> dict[str, Any]:
+    """Fold the per-metric deltas into 0..100 dimension scores and one weighted match score."""
+    dimensions: dict[str, float | None] = {}
+
+    dimensions["loudness"] = _closeness(deltas.get("loudness_lu"), 6.0)
+
+    dynamics = [
+        value
+        for value in (
+            _closeness(deltas.get("loudness_range_lu"), 6.0),
+            _closeness(deltas.get("crest_factor_db"), 6.0),
+        )
+        if value is not None
+    ]
+    dimensions["dynamics"] = sum(dynamics) / len(dynamics) if dynamics else None
+
+    brightness = deltas.get("brightness_hz")
+    reference_centroid = reference.get("centroid_hz")
+    if brightness is not None and reference_centroid:
+        dimensions["tone"] = max(0.0, 1.0 - (abs(brightness) / float(reference_centroid)) / 0.5)
+    else:
+        dimensions["tone"] = None
+
+    band_deltas = deltas.get("bands")
+    if band_deltas:
+        total_variation = 0.5 * sum(abs(value) for value in band_deltas.values())
+        dimensions["band_balance"] = max(0.0, 1.0 - min(1.0, total_variation))
+    else:
+        dimensions["band_balance"] = None
+
+    dimensions["stereo"] = _closeness(deltas.get("stereo_width"), 0.5)
+    dimensions["phase"] = _closeness(deltas.get("correlation"), 1.0)
+
+    available = {name: value for name, value in dimensions.items() if value is not None}
+    if available:
+        total_weight = sum(_DIMENSION_WEIGHTS[name] for name in available)
+        score = sum(value * _DIMENSION_WEIGHTS[name] for name, value in available.items()) / total_weight
+        overall = round(score * 100.0, 1)
+        weakest = min(available, key=lambda name: available[name])
+    else:
+        overall = None
+        weakest = None
+
+    return {
+        "score": overall,
+        "verdict": _verdict(overall),
+        "dimensions": {name: round(value * 100.0, 1) for name, value in available.items()},
+        "weakest_dimension": weakest,
+    }
+
+
 def build_reference_comparison(
     mix: dict[str, Any],
     reference: dict[str, Any],
@@ -135,5 +216,6 @@ def build_reference_comparison(
         "mix": mix,
         "reference": reference,
         "deltas": deltas,
+        "match": _build_match(deltas, reference),
         "guidance": guidance,
     }
