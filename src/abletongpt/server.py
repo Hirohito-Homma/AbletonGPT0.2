@@ -136,7 +136,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
-            "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with plain-language guidance (requires the audio extra: NumPy)",
+            "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with a 0-100 match score and plain-language guidance (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -483,9 +483,9 @@ def _audio_reference_profile(file_path: str) -> dict[str, Any]:
 
 @mcp.tool()
 def compare_mix_to_reference(mix_path: str, reference_path: str) -> dict[str, Any]:
-    """自分のミックスとリファレンス曲(WAV/AIFF)を、ラウドネス(LUFS/LRA/True Peak/Crest)と音色(明るさ/ロールオフ)で
-    比較し、差分と平易なガイダンス(例:「リファレンスより2LU静かで明るい」)を返す。ゲイン変更等の適用はしない(解析のみ)。
-    読み取り専用。NumPy必須。"""
+    """自分のミックスとリファレンス曲(WAV/AIFF)を、ラウドネス(LUFS/LRA/True Peak/Crest)・音色(明るさ/帯域バランス)・
+    ステレオ像で比較し、差分・平易なガイダンス・総合マッチスコア(0-100)と最も離れている次元を返す。
+    ゲイン変更等の適用はしない(解析のみ)。読み取り専用。NumPy必須。"""
     return build_reference_comparison(
         _audio_reference_profile(mix_path),
         _audio_reference_profile(reference_path),
