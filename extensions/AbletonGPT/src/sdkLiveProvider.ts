@@ -174,6 +174,57 @@ export class SdkLiveProvider {
     };
   }
 
+  private async mixState(index: number, track: Track<"1.0.0">): Promise<{
+    index: number;
+    name: string;
+    volume: number;
+    pan: number;
+    mute: boolean;
+    solo: boolean;
+    output_meter_level: null;
+    sends: Array<{ index: number; value: number }>;
+  }> {
+    const mixer = track.mixer;
+    const sends = await Promise.all(
+      mixer.sends.map(async (send, sendIndex) => ({
+        index: sendIndex,
+        value: await send.getValue(),
+      })),
+    );
+    return {
+      index,
+      name: track.name,
+      volume: await mixer.volume.getValue(),
+      pan: await mixer.panning.getValue(),
+      mute: safeBool(() => track.mute),
+      solo: safeBool(() => track.solo),
+      // The SDK exposes no meter; parity keeps this null (the snapshot builder drops the
+      // momentary meter anyway). mainTrack has no mute/solo, hence the guarded reads above.
+      output_meter_level: null,
+      sends,
+    };
+  }
+
+  async getMixSnapshot(): Promise<{
+    tracks: Array<Awaited<ReturnType<SdkLiveProvider["mixState"]>>>;
+    returns: Array<Awaited<ReturnType<SdkLiveProvider["mixState"]>>>;
+    master: Awaited<ReturnType<SdkLiveProvider["mixState"]>>;
+    meter_note: string;
+  }> {
+    const song = this.song;
+    const tracks = await Promise.all(song.tracks.map((track, index) => this.mixState(index, track)));
+    const returns = await Promise.all(
+      song.returnTracks.map((track, index) => this.mixState(index, track)),
+    );
+    const master = await this.mixState(-1, song.mainTrack);
+    return {
+      tracks,
+      returns,
+      master,
+      meter_note: "the Extensions SDK exposes no meter; output_meter_level is null",
+    };
+  }
+
   async getMidiClipNotes(params: { track_index: number; clip_index: number }): Promise<{
     track_index: number;
     track: string;
@@ -471,6 +522,16 @@ export class SdkLiveProvider {
       length_beats: clip.duration,
       note_count: notes.length,
     };
+  }
+}
+
+// Read a boolean getter that may not exist on every track (e.g. mainTrack has no
+// mute/solo), defaulting to false instead of throwing.
+function safeBool(read: () => boolean): boolean {
+  try {
+    return Boolean(read());
+  } catch {
+    return false;
   }
 }
 
