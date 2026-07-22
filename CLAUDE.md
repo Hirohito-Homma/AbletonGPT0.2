@@ -69,6 +69,10 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   converts an `extract_melody` result + tempo into `create_midi_clip`-ready notes in beats.
   Pure, stdlib-only (no NumPy); the NumPy extraction stays in the server tool. Used by the
   `plan_/create_midi_from_audio_melody` plan/create tool pair (audio-to-MIDI).
+- **`warp.py`** — `build_warp_alignment` compares a clip's warp-marker sample times against
+  detected onset times and reports how well they align (markers-on-transients, onset coverage,
+  offset stats). Pure, stdlib-only. Warp-marker *writing* is not exposed by the Live API, so this
+  stays read-only (report only).
 
 ## Two separate ports — do not confuse them
 

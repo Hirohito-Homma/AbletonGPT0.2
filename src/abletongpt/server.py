@@ -33,6 +33,7 @@ from .transcription import (
     build_midi_from_melody,
     build_midi_from_times,
 )
+from .warp import build_warp_alignment
 from .vocal import build_vocal_plan
 
 
@@ -129,6 +130,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
+            "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -628,6 +630,44 @@ def create_arrangement_locators_from_structure(
     result["source"] = "audio_structure"
     result["planned_count"] = plan["count"]
     return result
+
+
+@mcp.tool()
+def get_clip_warp_markers(track_index: int, clip_index: int) -> dict[str, Any]:
+    """指定SessionスロットのオーディオクリップのWarpマーカー(beat_time/sample_time)とWarp状態を読み取り専用で取得する。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    return bridge.call("get_clip_warp_markers", track_index=track_index, clip_index=clip_index)
+
+
+@mcp.tool()
+def analyze_clip_warp_alignment(
+    file_path: str,
+    track_index: int,
+    clip_index: int,
+    tolerance_seconds: float = 0.05,
+    delta: float = 0.07,
+) -> dict[str, Any]:
+    """オーディオクリップの既存Warpマーカーと、その元WAV/AIFFで検出したオンセットの整合度を読み取り専用で報告する。
+    各Warpマーカーが実トランジェント上にあるか、各オンセットがマーカーで捉えられているか(tolerance_seconds以内)を集計。
+    Warpマーカーの書き込みはLive APIが非対応のため行わない(解析のみ)。NumPy必須。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip = bridge.call("get_clip_warp_markers", track_index=track_index, clip_index=clip_index)
+    onsets = detect_onsets(file_path, delta=delta)
+    report = build_warp_alignment(
+        [marker["sample_time"] for marker in clip["markers"]],
+        onsets["onset_times"],
+        tolerance_seconds=tolerance_seconds,
+    )
+    report["file"] = file_path
+    report["clip"] = {
+        "track": clip["track"],
+        "name": clip["clip"],
+        "warping": clip["warping"],
+        "warp_mode": clip["warp_mode"],
+    }
+    return report
 
 
 @mcp.tool()
