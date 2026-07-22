@@ -42,6 +42,31 @@ test("get_state returns tempo, scene count and tracks", async () => {
   assert.equal("is_playing" in response.result, false);
 });
 
+test("get_mix_snapshot returns tracks, returns and master", async () => {
+  const response = await dispatcher().handle({ command: "get_mix_snapshot" });
+  assert.equal(response.ok, true);
+  const { tracks, returns, master } = response.result;
+  assert.equal(tracks.length, 2);
+  assert.equal(returns.length, 1);
+  assert.equal(master.index, -1);
+  // Parity shape: every channel carries volume/pan/mute/solo/sends; the SDK has no meter.
+  for (const channel of [...tracks, ...returns, master]) {
+    assert.equal(typeof channel.volume, "number");
+    assert.equal(typeof channel.pan, "number");
+    assert.equal(typeof channel.mute, "boolean");
+    assert.equal(Array.isArray(channel.sends), true);
+    assert.equal(channel.output_meter_level, null);
+  }
+});
+
+test("get_mix_snapshot reflects a volume mutation", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  await disp.handle({ command: "set_track_volume", params: { track_index: 0, volume: 0.42 } });
+  const response = await disp.handle({ command: "get_mix_snapshot" });
+  assert.equal(response.result.tracks[0].volume, 0.42);
+});
+
 test("get_midi_clip_notes returns a readable clip payload", async () => {
   const response = await dispatcher().handle({
     command: "get_midi_clip_notes",
@@ -239,6 +264,7 @@ test("the command allowlist is exactly the v1 set", () => {
       "apply_expression_to_clip",
       "create_midi_clip",
       "get_midi_clip_notes",
+      "get_mix_snapshot",
       "get_selected_context",
       "get_state",
       "get_tempo",

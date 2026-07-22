@@ -16,6 +16,9 @@ export class LiveProvider {
   async getSelectedContext() {
     throw new Error("not implemented");
   }
+  async getMixSnapshot() {
+    throw new Error("not implemented");
+  }
   async createMidiClip(_params) {
     throw new Error("not implemented");
   }
@@ -175,6 +178,32 @@ export class MockLiveProvider extends LiveProvider {
 
   async getSelectedContext() {
     return { track_index: 0, clip_index: null, scene_index: 0 };
+  }
+
+  static _mixState(index, track) {
+    return {
+      index,
+      name: track.name,
+      volume: typeof track.volume === "number" ? track.volume : 0.85,
+      pan: typeof track.pan === "number" ? track.pan : 0,
+      mute: Boolean(track.mute),
+      solo: Boolean(track.solo),
+      // The Extensions SDK exposes no meter, so parity keeps this null (the snapshot
+      // builder drops the momentary meter anyway).
+      output_meter_level: null,
+      sends: (track.sends || []).map((value, sendIndex) => ({ index: sendIndex, value })),
+    };
+  }
+
+  async getMixSnapshot() {
+    return {
+      tracks: this.tracks.map((track, index) => MockLiveProvider._mixState(index, track)),
+      returns: [
+        MockLiveProvider._mixState(0, { name: "A-Reverb", volume: 0.5, pan: 0, sends: [] }),
+      ],
+      master: MockLiveProvider._mixState(-1, { name: "Master", volume: 0.85, pan: 0, sends: [] }),
+      meter_note: "no meter in the Extensions SDK; output_meter_level is null",
+    };
   }
 
   async getMidiClipNotes(params) {
