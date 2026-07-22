@@ -10,6 +10,7 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
+from .audio import estimate_tempo
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
@@ -96,6 +97,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
+            "offline WAV/AIFF tempo (BPM) estimation (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -339,6 +341,16 @@ def analyze_audio_loudness(
 ) -> dict[str, Any]:
     """WAV/AIFFを変更せず、LUFS、LRA、True Peak推定、RMS、Crest Factorを解析する。target_lufsは任意。"""
     return analyze_loudness_file(file_path, target_lufs, target_true_peak_dbtp)
+
+
+@mcp.tool()
+def analyze_audio_tempo(
+    file_path: str,
+    min_bpm: float = 60.0,
+    max_bpm: float = 200.0,
+) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、テンポ(BPM)をオフライン推定する。NumPy(`abletongpt[audio]`)が必要。読み取り専用。"""
+    return estimate_tempo(file_path, min_bpm=min_bpm, max_bpm=max_bpm)
 
 
 @mcp.tool()

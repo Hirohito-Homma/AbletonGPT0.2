@@ -16,7 +16,17 @@ from __future__ import annotations
 import argparse
 from typing import Callable, Dict, Tuple
 
-from . import arrange, compose, contextual, expression, instruments, jobs, loudness, vocal
+from . import (
+    arrange,
+    audio,
+    compose,
+    contextual,
+    expression,
+    instruments,
+    jobs,
+    loudness,
+    vocal,
+)
 
 #: Callable that runs a subcommand with the remaining argv and returns an exit code.
 _Handler = Callable[[list], int]
@@ -41,6 +51,10 @@ _SUBCOMMANDS: Dict[str, Tuple[_Handler, str]] = {
     "loudness": (
         loudness.main,
         "Analyze WAV/AIFF loudness (LUFS / LRA / peak) offline.",
+    ),
+    "audio": (
+        audio.main,
+        "Extract audio-track features offline (tempo; needs the audio extra).",
     ),
     "jobs": (jobs.main, "Create, run and inspect multi-step job plans."),
 }

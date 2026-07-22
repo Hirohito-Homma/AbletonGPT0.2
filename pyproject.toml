@@ -10,7 +10,9 @@ requires-python = ">=3.11"
 dependencies = ["mcp>=1.25,<2"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# Offline audio extraction (tempo/key/...). Opt-in so the base install stays stdlib-only.
+audio = ["numpy>=1.24"]
+dev = ["pytest>=8", "numpy>=1.24"]
 
 [project.scripts]
 abletongpt = "abletongpt.server:main"

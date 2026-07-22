@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-uv sync --extra dev            # create .venv and install deps + pytest
+uv sync --extra dev            # create .venv and install deps + pytest (dev also pulls NumPy)
+uv sync --extra audio          # add the opt-in audio extra (NumPy) for tempo extraction
 uv run pytest                  # full test suite (pythonpath=src is set in pyproject.toml)
 uv run pytest tests/test_bridge.py::test_name   # single test
 ```
@@ -58,6 +59,9 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
 - **`instruments.py`** — role/genre/mood → native-instrument selection with ordered fallbacks.
 - **`vocal.py`** — lyrics → editable Vocal Guide MIDI and the external-render handoff contract.
 - **`loudness.py`** — offline BS.1770 / EBU R128 analysis of WAV/AIFF; reads the file, never writes.
+- **`audio.py`** — offline audio-track feature extraction (tempo so far). Reuses `loudness.py`'s
+  reader and needs the optional `audio` extra (NumPy, imported lazily); the base install stays
+  stdlib-only. Reads the file, never writes.
 
 ## Two separate ports — do not confuse them
 
