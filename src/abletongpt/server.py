@@ -8,11 +8,47 @@ from mcp.server.fastmcp import FastMCP
 
 from .bridge import AbletonBridge
 from .composition import build_song_plan
+from .config import setting
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
+from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .vocal import build_vocal_plan
+
+
+#: Accepted ``backend`` config values mapped to their canonical name. The Remote Script
+#: is the default; ``extensions`` opts into the Ableton Extensions SDK companion.
+_BACKEND_ALIASES = {
+    "": "remote_script",
+    "default": "remote_script",
+    "remote": "remote_script",
+    "remote_script": "remote_script",
+    "extension": "extensions",
+    "extensions": "extensions",
+}
+
+
+def resolve_backend_name() -> str:
+    """Return the canonical backend name from config/env (raises on an unknown value)."""
+    raw = str(setting("backend", "remote_script")).strip().lower()
+    if raw not in _BACKEND_ALIASES:
+        raise ValueError(
+            "unknown backend %r; use 'remote_script' or 'extensions'" % raw
+        )
+    return _BACKEND_ALIASES[raw]
+
+
+def select_backend() -> AbletonBridge | ExtensionsBridge:
+    """Build the configured Live backend. Both share the same ``call`` contract.
+
+    ``remote_script`` (default) talks to the Control Surface Remote Script; ``extensions``
+    talks to the Ableton Extensions SDK companion (Live 12 Suite Beta 12.4.5+). The
+    connection is lazy, so selecting a backend never opens a socket on its own.
+    """
+    if resolve_backend_name() == "extensions":
+        return ExtensionsBridge()
+    return AbletonBridge()
 
 
 mcp = FastMCP(
@@ -24,7 +60,7 @@ mcp = FastMCP(
     host=os.getenv("ABLETONGPT_MCP_HOST", "127.0.0.1"),
     port=int(os.getenv("ABLETONGPT_MCP_PORT", "8000")),
 )
-bridge = AbletonBridge()
+bridge = select_backend()
 
 
 @mcp.tool()
@@ -33,6 +69,8 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
     return {
         "version": "0.2.0",
         "live_support": "Ableton Live 11+; native device insertion requires Live 12.3+",
+        "backend": resolve_backend_name(),
+        "available_backends": ["remote_script", "extensions"],
         "features": [
             "transport and track control",
             "beginner song sketches",
@@ -51,6 +89,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
+            "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
             "localhost-only Ableton bridge",
