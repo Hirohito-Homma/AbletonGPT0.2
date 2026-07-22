@@ -32,6 +32,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
 from .reference import build_reference_comparison
+from .remap import build_scale_remap_plan
 from .scale import build_scale_quantize_plan, parse_scale
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
@@ -148,6 +149,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "harmonic-mixing key compatibility on the Camelot wheel (two keys or two audio files) with a 0-100 score and suggested compatible keys",
             "transposing an existing MIDI clip by a fixed interval or to a target key/Camelot code (plan then apply; note count unchanged, Live-undoable)",
             "scale-quantizing an existing MIDI clip: snapping out-of-scale notes to the nearest note in a key/scale (plan then apply; note count unchanged, Live-undoable)",
+            "transcribing an existing MIDI chord progression to a target key/scale by scale degree (diatonic/modal remap, e.g. major->minor; plan then apply; note count unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -567,6 +569,128 @@ def apply_scale_quantize_midi(
         "scale": plan["scale"],
         "note_count": plan["note_count"],
         "changed_notes": plan["changed_notes"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+def _resolve_remap(
+    clip_data: dict[str, Any],
+    target_key: str,
+    target_scale: str,
+    source_key: str,
+    source_scale: str,
+) -> dict[str, Any]:
+    """Resolve source + target (tonic, scale) for a diatonic remap.
+
+    The target tonic comes from ``target_key``; the source tonic/mode from ``source_key`` if
+    given, otherwise detected from the clip. ``*_scale="auto"`` follows that key's major/minor
+    mode; an explicit scale overrides it.
+    """
+    target_tonic, target_mode = parse_key(target_key)
+    detected = False
+    if source_key:
+        source_tonic, source_mode = parse_key(source_key)
+    else:
+        context = analyze_midi_context(clip_data)
+        detected_key = context["musical_context"]["key"]
+        if not detected_key:
+            raise ValueError(
+                "could not detect a source key from the clip (e.g. drums); pass source_key"
+            )
+        source_tonic = int(detected_key["tonic_pitch_class"])
+        source_mode = str(detected_key["mode"])
+        detected = True
+
+    resolved_source_scale = parse_scale(
+        source_mode if source_scale.strip().lower() in ("", "auto") else source_scale
+    )
+    resolved_target_scale = parse_scale(
+        target_mode if target_scale.strip().lower() in ("", "auto") else target_scale
+    )
+    return {
+        "source_tonic_pitch_class": source_tonic,
+        "source_scale": resolved_source_scale,
+        "source_key": "%s %s" % (_NOTE_NAMES[source_tonic % 12], resolved_source_scale),
+        "target_tonic_pitch_class": target_tonic,
+        "target_scale": resolved_target_scale,
+        "target_key": "%s %s" % (_NOTE_NAMES[target_tonic % 12], resolved_target_scale),
+        "source_key_detected": detected,
+    }
+
+
+@mcp.tool()
+def plan_remap_progression_to_key(
+    track_index: int,
+    clip_index: int,
+    target_key: str,
+    target_scale: str = "auto",
+    source_key: str = "",
+    source_scale: str = "auto",
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップ(コード進行)を目標キー/スケールへ度数を保って転写するプランを作る。
+    各音を元スケールの度数に分解し、目標スケールの同じ度数へ写す(=機能を保ったモード/キー変換。例:C major
+    I-IV-VをC minorのi-iv-vへ)。target_keyでトニック指定、target_scale="auto"はそのキーのmajor/minorに従う。
+    元キーはsource_key/source_scale未指定ならクリップから自動検出。元と先のスケールは度数(音数)が同じ必要がある。
+    ノート数不変。適用はapply_remap_progression_to_key。クロマチックな平行移調はplan_transpose_midiを使う。
+    読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_remap(clip_data, target_key, target_scale, source_key, source_scale)
+    plan = build_scale_remap_plan(
+        clip_data,
+        resolution["source_tonic_pitch_class"],
+        resolution["source_scale"],
+        resolution["target_tonic_pitch_class"],
+        resolution["target_scale"],
+    )
+    plan["resolution"] = resolution
+    plan["next_step"] = (
+        "内容を確認し、apply_remap_progression_to_keyに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_remap_progression_to_key(
+    track_index: int,
+    clip_index: int,
+    target_key: str,
+    target_scale: str = "auto",
+    source_key: str = "",
+    source_scale: str = "auto",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_remap_progression_to_keyで確認した度数保存の転写を、既存MIDIクリップのノートへ適用する。
+    ノート数は不変でLiveのUndoで戻せる。expected_source_fingerprintを渡すと確認後にクリップが変わっていた
+    場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_remap(clip_data, target_key, target_scale, source_key, source_scale)
+    plan = build_scale_remap_plan(
+        clip_data,
+        resolution["source_tonic_pitch_class"],
+        resolution["source_scale"],
+        resolution["target_tonic_pitch_class"],
+        resolution["target_scale"],
+    )
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "resolution": resolution,
+        "note_count": plan["note_count"],
+        "changed_notes": plan["changed_notes"],
+        "folded_notes": plan["folded_notes"],
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }

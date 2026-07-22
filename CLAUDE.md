@@ -109,6 +109,15 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   pair resolves the tonic+scale from a `key` (via `harmony.parse_key`; `scale="auto"` follows the
   key's mode) or detects it from the clip (`contextual.analyze_midi_context`); apply writes back
   through the same undoable `apply_expression_to_clip` path with a fingerprint guard.
+- **`remap.py`** — `build_scale_remap_plan` transcribes a clip from one key/scale to another *by
+  scale degree* (diatonic/modal remap): each note is resolved to its source-scale degree + octave
+  + chromatic offset and rebuilt on the same degree of the target scale, so harmonic function is
+  kept (C major I-IV-V → C minor i-iv-v). Reuses `scale.SCALE_INTERVALS`; source and target scales
+  must have the same degree count (else it raises). Same-shape scales reduce to a diatonic
+  transposition. Pure, stdlib-only. The `plan_/apply_remap_progression_to_key` pair resolves
+  source/target tonic+scale (target from `target_key`, source from `source_key` or detected) and
+  writes back via the undoable `apply_expression_to_clip` path with a fingerprint guard. Distinct
+  from `transpose.py` (a mode-blind chromatic shift).
 
 ## Two separate ports — do not confuse them
 
