@@ -59,9 +59,12 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
 - **`instruments.py`** — role/genre/mood → native-instrument selection with ordered fallbacks.
 - **`vocal.py`** — lyrics → editable Vocal Guide MIDI and the external-render handoff contract.
 - **`loudness.py`** — offline BS.1770 / EBU R128 analysis of WAV/AIFF; reads the file, never writes.
-- **`audio.py`** — offline audio-track feature extraction (tempo so far). Reuses `loudness.py`'s
-  reader and needs the optional `audio` extra (NumPy, imported lazily); the base install stays
-  stdlib-only. Reads the file, never writes.
+- **`audio.py`** — offline audio-track feature extraction (tempo, key, chord progression,
+  monophonic melody). Reuses `loudness.py`'s reader and needs the optional `audio` extra (NumPy,
+  imported lazily); the base install stays stdlib-only. Reads the file, never writes.
+- **`snapshots.py`** — normalizes the read-only `get_state` + `get_mix_snapshot` bridge responses
+  into a stable, meter-free mix-state snapshot (`build_snapshot`) and diffs two snapshots
+  (`diff_snapshots`). Pure and deterministic (timestamp passed in, not read from a clock).
 
 ## Two separate ports — do not confuse them
 
