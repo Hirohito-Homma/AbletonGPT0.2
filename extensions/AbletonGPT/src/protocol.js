@@ -17,6 +17,7 @@ const COMMANDS = {
   get_tracks: async (provider) => provider.getTracks(),
   get_selected_context: async (provider) => provider.getSelectedContext(),
   create_midi_clip: async (provider, params) => provider.createMidiClip(params),
+  apply_expression_to_clip: async (provider, params) => provider.applyExpressionToClip(params),
 };
 
 export function successResponse(result) {

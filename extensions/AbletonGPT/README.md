@@ -60,6 +60,7 @@ Config (shared with the Python bridge):
 | `get_tempo` | `song.tempo` | |
 | `get_tracks` | `song.tracks` | `has_midi_input` = `track instanceof MidiTrack` |
 | `create_midi_clip` | `clipSlot.createMidiClip` + `midiClip.notes` | non-destructive: refuses a non-empty slot; carries per-note probability |
+| `apply_expression_to_clip` | `midiClip.notes` (wholesale replace) | replaces the notes of an existing MIDI clip; keeps probability; parity with the Remote Script backend |
 | `get_selected_context` | **unsupported** | the SDK delivers selection only via context-menu commands, not as an ambient query |
 
 `SdkLiveProvider` (`src/sdkLiveProvider.ts`) is written against the SDK's `@ableton-extensions/sdk`

@@ -31,6 +31,8 @@ export class MockLiveProvider extends LiveProvider {
     ];
     // Records clips created during a session so tests can assert on mutations.
     this.createdClips = [];
+    // Records expression note-replacements applied to clips.
+    this.appliedExpressions = [];
   }
 
   async getTempo() {
@@ -67,6 +69,25 @@ export class MockLiveProvider extends LiveProvider {
       note_count: notes.length,
     };
     this.createdClips.push(record);
+    return record;
+  }
+
+  async applyExpressionToClip(params) {
+    const trackIndex = Number(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+    const notes = Array.isArray(params.notes) ? params.notes : [];
+    const record = {
+      track_index: trackIndex,
+      clip_index: clipIndex,
+      note_count: notes.length,
+    };
+    this.appliedExpressions.push(record);
     return record;
   }
 }

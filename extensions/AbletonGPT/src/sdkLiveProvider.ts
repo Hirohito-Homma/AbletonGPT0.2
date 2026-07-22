@@ -3,7 +3,7 @@
 // Implements the same interface as MockLiveProvider (src/liveProvider.js) so the protocol
 // layer is backend-agnostic. Every method uses only the confirmed v1.0.0 SDK surface.
 
-import { type ExtensionContext, MidiTrack, type NoteDescription } from "@ableton-extensions/sdk";
+import { type ExtensionContext, MidiClip, MidiTrack, type NoteDescription } from "@ableton-extensions/sdk";
 
 // A note as it arrives over the wire from the Python side (snake_case).
 export type IncomingNote = {
@@ -20,6 +20,13 @@ export type CreateMidiClipParams = {
   clip_index: number;
   name?: string;
   length_beats: number;
+  notes?: IncomingNote[];
+};
+
+export type ApplyExpressionParams = {
+  track_index: number;
+  clip_index: number;
+  length_beats?: number;
   notes?: IncomingNote[];
 };
 
@@ -106,6 +113,56 @@ export class SdkLiveProvider {
       clip_index: clipIndex,
       name: clip.name,
       length_beats: length,
+      note_count: notes.length,
+    };
+  }
+
+  async applyExpressionToClip(params: ApplyExpressionParams): Promise<{
+    track_index: number;
+    clip_index: number;
+    name: string;
+    length_beats: number;
+    note_count: number;
+  }> {
+    const trackIndex = Number(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+
+    const track = this.song.tracks[trackIndex];
+    if (!track) {
+      throw new Error("track_index is out of range");
+    }
+    if (!(track instanceof MidiTrack)) {
+      throw new Error("target track is not a MIDI track");
+    }
+    const slot = track.clipSlots[clipIndex];
+    if (!slot) {
+      throw new Error("clip_index is out of range");
+    }
+    const clip = slot.clip;
+    if (clip === null) {
+      throw new Error("target clip slot is empty");
+    }
+    if (!(clip instanceof MidiClip)) {
+      throw new Error("target clip is not a MIDI clip");
+    }
+
+    // Replace the clip's notes wholesale; the setter overwrites the full note set, so the
+    // note count is whatever the caller sends (the expression plan keeps it unchanged).
+    const incoming = Array.isArray(params.notes) ? params.notes : [];
+    const notes = incoming.map(toNoteDescription);
+    clip.notes = notes;
+
+    return {
+      track_index: trackIndex,
+      clip_index: clipIndex,
+      name: clip.name,
+      length_beats: clip.duration,
       note_count: notes.length,
     };
   }
