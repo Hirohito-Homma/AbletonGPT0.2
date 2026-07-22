@@ -41,6 +41,7 @@ from .remap import build_scale_remap_plan
 from .scale import build_scale_quantize_plan, parse_scale
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
+from .timescale import build_timescale_plan, factor_for
 from .transpose import build_transpose_plan, shift_to_target_pc
 from .transcription import (
     build_locators_from_structure,
@@ -160,6 +161,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
+            "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -1603,6 +1605,82 @@ def create_phrase_from_loop(
         "destination_clip_index": destination_clip_index,
         "created": created,
         "next_step": "生成したフレーズを再生して確認してください。元ループは変更していません。",
+    }
+
+
+def _resolve_timescale_factor(mode: str, factor: float) -> float:
+    """Pick the time-scale factor from a named mode ('half'/'double') or an explicit factor."""
+    if mode:
+        return factor_for(mode)
+    if factor <= 0.0:
+        raise ValueError("pass mode='half'/'double' or a positive factor")
+    return factor
+
+
+@mcp.tool()
+def plan_timescale_clip(
+    track_index: int,
+    clip_index: int,
+    mode: str = "",
+    factor: float = 0.0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップをhalf-time/double-timeに変換するプランを作る。mode="half"(×2、遅く長く)
+    /"double"(×0.5、速く短く)、またはfactorを直接指定(2.0=half,0.5=double)。全ノートのstart/durationとクリップ長を
+    factor倍する(音高/ベロシティ/ノート数は不変)。長さが変わるので新しい空スロットへ書き出す(create_timescale_clip)。
+    読み取り専用・NumPy不要。"""
+    resolved_factor = _resolve_timescale_factor(mode, factor)
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_timescale_plan(clip_data, resolved_factor)
+    plan["mode"] = mode or ("half" if resolved_factor > 1.0 else "double" if resolved_factor < 1.0 else "same")
+    plan["next_step"] = (
+        "空きスロットを選び、create_timescale_clipに同じ引数とdestination_clip_index、"
+        "expected_source_fingerprint=%s を渡して書き出してください。" % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def create_timescale_clip(
+    track_index: int,
+    clip_index: int,
+    destination_clip_index: int,
+    mode: str = "",
+    factor: float = 0.0,
+    destination_track_index: int = -1,
+    name: str = "",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_timescale_clipで確認したhalf/double-time変換を、空きSessionスロットへ新規クリップとして書き出す。
+    全ノートのstart/durationとクリップ長をfactor倍し、destination_clip_index(省略時は同一track)の空スロットへ
+    create_midi_clipで作成する(占有スロットは拒否=非破壊)。expected_source_fingerprintを渡すと確認後に元クリップが
+    変わっていた場合は拒否する。読み取り以外の副作用は新規クリップ作成のみ。"""
+    if track_index < 0 or clip_index < 0 or destination_clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    resolved_factor = _resolve_timescale_factor(mode, factor)
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_timescale_plan(clip_data, resolved_factor)
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    destination_track = track_index if destination_track_index < 0 else destination_track_index
+    label = mode or ("half" if resolved_factor > 1.0 else "double")
+    clip_name = name or "%s %s" % (clip_data.get("clip", "Clip"), label)
+    created = bridge.call(
+        "create_midi_clip",
+        track_index=destination_track,
+        clip_index=destination_clip_index,
+        name=clip_name,
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    return {
+        "factor": plan["factor"],
+        "source_length_beats": plan["source_length_beats"],
+        "length_beats": plan["length_beats"],
+        "note_count": plan["note_count"],
+        "destination_track_index": destination_track,
+        "destination_clip_index": destination_clip_index,
+        "created": created,
+        "next_step": "生成したクリップを再生して確認してください。元クリップは変更していません。",
     }
 
 
