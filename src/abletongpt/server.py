@@ -31,6 +31,7 @@ from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .quantize import build_quantize_plan
 from .reference import build_reference_comparison
 from .remap import build_scale_remap_plan
 from .scale import build_scale_quantize_plan, parse_scale
@@ -150,6 +151,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "transposing an existing MIDI clip by a fixed interval or to a target key/Camelot code (plan then apply; note count unchanged, Live-undoable)",
             "scale-quantizing an existing MIDI clip: snapping out-of-scale notes to the nearest note in a key/scale (plan then apply; note count unchanged, Live-undoable)",
             "transcribing an existing MIDI chord progression to a target key/scale by scale degree (diatonic/modal remap, e.g. major->minor; plan then apply; note count unchanged, Live-undoable)",
+            "quantizing an existing MIDI clip's note timing to a grid with strength and optional swing (plan then apply; only start times move, note count unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -691,6 +693,67 @@ def apply_remap_progression_to_key(
         "note_count": plan["note_count"],
         "changed_notes": plan["changed_notes"],
         "folded_notes": plan["folded_notes"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+@mcp.tool()
+def plan_quantize_midi_timing(
+    track_index: int,
+    clip_index: int,
+    grid_beats: float = 0.25,
+    strength: float = 1.0,
+    swing: float = 0.0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップのノート開始位置をグリッドへ量子化するプランを作る。grid_beatsは
+    グリッド間隔(拍。0.25=16分,0.5=8分)。strength(0..1)はスナップ量(1=完全,0=無し=LiveのAmount)。
+    swing(0..1)は裏(奇数グリッド)を後ろへずらしスイングを付与(~0.6で三連系)。開始位置のみ変更しノート数不変。
+    ピッチ量子化はplan_scale_quantize_midi(別物)。適用はapply_quantize_midi_timing。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_quantize_plan(clip_data, grid_beats=grid_beats, strength=strength, swing=swing)
+    plan["next_step"] = (
+        "内容を確認し、apply_quantize_midi_timingに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_quantize_midi_timing(
+    track_index: int,
+    clip_index: int,
+    grid_beats: float = 0.25,
+    strength: float = 1.0,
+    swing: float = 0.0,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_quantize_midi_timingで確認したタイミング量子化を、既存MIDIクリップのノートへ適用する。ノート開始位置
+    のみを動かす(ノート数・音高・長さは不変、LiveのUndoで戻せる)。expected_source_fingerprintを渡すと確認後に
+    クリップが変わっていた場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_quantize_plan(clip_data, grid_beats=grid_beats, strength=strength, swing=swing)
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "grid_beats": plan["grid_beats"],
+        "strength": plan["strength"],
+        "swing": plan["swing"],
+        "note_count": plan["note_count"],
+        "moved_notes": plan["moved_notes"],
+        "max_abs_shift_beats": plan["max_abs_shift_beats"],
+        "average_abs_shift_beats": plan["average_abs_shift_beats"],
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }

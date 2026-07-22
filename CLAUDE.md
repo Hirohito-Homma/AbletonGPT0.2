@@ -118,6 +118,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   source/target tonic+scale (target from `target_key`, source from `source_key` or detected) and
   writes back via the undoable `apply_expression_to_clip` path with a fingerprint guard. Distinct
   from `transpose.py` (a mode-blind chromatic shift).
+- **`quantize.py`** — `build_quantize_plan` snaps note *start times* to a grid: `strength` (0..1)
+  sets how far each note moves toward its grid target (Live's Amount), `swing` (0..1) pushes odd
+  grid positions (the off-beats) later by up to half a grid step. Only `start_time` moves
+  (pitch/duration/velocity/probability kept, note count unchanged); notes never snap to the grid
+  line at the clip end. Pure, stdlib-only. The `plan_/apply_quantize_midi_timing` pair writes back
+  via the undoable `apply_expression_to_clip` path with a fingerprint guard. Timing quantization —
+  distinct from `scale.py`'s pitch quantization.
 
 ## Two separate ports — do not confuse them
 
