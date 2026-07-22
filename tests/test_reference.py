@@ -63,3 +63,37 @@ def test_none_metrics_are_skipped():
 
     assert report["deltas"]["loudness_lu"] is None
     assert not any("LU louder" in note or "LU quieter" in note for note in report["guidance"])
+
+
+def _bands(low=0.2, low_mid=0.2, mid=0.2, high_mid=0.2, high=0.2):
+    return {"low": low, "low_mid": low_mid, "mid": mid, "high_mid": high_mid, "high": high}
+
+
+def test_band_deltas_and_guidance():
+    mix = _profile()
+    mix["bands"] = _bands(low=0.30, high=0.10)  # more low, less high
+    ref = _profile()
+    ref["bands"] = _bands(low=0.20, high=0.20)
+
+    report = build_reference_comparison(mix, ref)
+
+    assert report["deltas"]["bands"]["low"] == 0.1
+    assert report["deltas"]["bands"]["high"] == -0.1
+    assert any("more low energy" in note for note in report["guidance"])
+    assert any("less high energy" in note for note in report["guidance"])
+
+
+def test_small_band_differences_not_flagged():
+    mix = _profile()
+    mix["bands"] = _bands(low=0.21)  # only +1 point
+    ref = _profile()
+    ref["bands"] = _bands()
+
+    report = build_reference_comparison(mix, ref)
+
+    assert not any("energy than the reference" in note for note in report["guidance"])
+
+
+def test_bands_absent_leaves_no_band_delta():
+    report = build_reference_comparison(_profile(), _profile())
+    assert "bands" not in report["deltas"]

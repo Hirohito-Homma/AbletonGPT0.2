@@ -983,3 +983,75 @@ def segment_structure(
         "duration_seconds": round(duration, 3),
         "method": "chroma-ssm-foote-novelty",
     }
+
+
+# Default tonal-balance bands (name, low Hz, high Hz), spanning the audible range.
+_DEFAULT_BANDS = (
+    ("low", 20.0, 120.0),
+    ("low_mid", 120.0, 500.0),
+    ("mid", 500.0, 2000.0),
+    ("high_mid", 2000.0, 6000.0),
+    ("high", 6000.0, 20000.0),
+)
+
+
+def extract_spectral_bands(
+    file_path: str,
+    *,
+    frame_size: int = 2048,
+    hop: int = 512,
+    bands: tuple[tuple[str, float, float], ...] = _DEFAULT_BANDS,
+) -> dict[str, Any]:
+    """Extract a level-independent tonal balance: the fraction of energy in each band.
+
+    Sums the STFT power spectrum over the whole file, then reports each band's share of the
+    in-band total, so the result describes *tone* independent of overall loudness -- ideal
+    for comparing a mix against a reference. Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if hop < 64 or hop > frame_size:
+        raise ValueError("hop must be between 64 and frame_size samples")
+    if not bands:
+        raise ValueError("at least one band is required")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for band analysis (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    window = np.hanning(frame_size)
+    power = np.zeros(freqs.size, dtype=np.float64)
+    for start in range(0, signal.size - frame_size + 1, hop):
+        magnitude = np.abs(np.fft.rfft(signal[start : start + frame_size] * window))
+        power += magnitude ** 2
+
+    band_power = []
+    for name, low_hz, high_hz in bands:
+        mask = (freqs >= low_hz) & (freqs < high_hz)
+        band_power.append((name, low_hz, high_hz, float(power[mask].sum())))
+    total = sum(entry[3] for entry in band_power)
+    if total <= 0.0:
+        raise ValueError("audio has no spectral energy in the requested bands")
+
+    band_list = [
+        {
+            "name": name,
+            "low_hz": low_hz,
+            "high_hz": high_hz,
+            "fraction": round(value / total, 6),
+        }
+        for name, low_hz, high_hz, value in band_power
+    ]
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "bands": band_list,
+        "band_fractions": {entry["name"]: entry["fraction"] for entry in band_list},
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "method": "stft-power-band-balance",
+    }

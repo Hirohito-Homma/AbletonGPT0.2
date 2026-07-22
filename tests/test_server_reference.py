@@ -17,22 +17,29 @@ _SPECTRAL = {
     "mix.wav": {"spectral_centroid_hz": {"mean": 3000.0}, "spectral_rolloff_hz": {"mean": 8000.0}},
     "ref.wav": {"spectral_centroid_hz": {"mean": 2000.0}, "spectral_rolloff_hz": {"mean": 6000.0}},
 }
+_BANDS = {
+    "mix.wav": {"band_fractions": {"low": 0.30, "low_mid": 0.2, "mid": 0.2, "high_mid": 0.2, "high": 0.10}},
+    "ref.wav": {"band_fractions": {"low": 0.20, "low_mid": 0.2, "mid": 0.2, "high_mid": 0.2, "high": 0.20}},
+}
 
 
-def test_compare_combines_loudness_and_tone(monkeypatch):
+def test_compare_combines_loudness_tone_and_bands(monkeypatch):
     monkeypatch.setattr(
         server, "analyze_loudness_file", lambda path, *a, **k: {"measurements": _LOUDNESS[path]}
     )
     monkeypatch.setattr(
         server, "extract_spectral_features", lambda path, *a, **k: {"features": _SPECTRAL[path]}
     )
+    monkeypatch.setattr(server, "extract_spectral_bands", lambda path, *a, **k: dict(_BANDS[path]))
 
     report = server.compare_mix_to_reference("mix.wav", "ref.wav")
 
     assert report["read_only"] is True
     assert report["deltas"]["loudness_lu"] == -4.0  # mix quieter
     assert report["deltas"]["brightness_hz"] == 1000.0  # mix brighter
+    assert report["deltas"]["bands"]["low"] == 0.1  # mix has more low end
     assert report["mix"]["file"] == "mix.wav"
     assert report["reference"]["file"] == "ref.wav"
     assert any("quieter" in note for note in report["guidance"])
     assert any("brighter" in note for note in report["guidance"])
+    assert any("more low energy" in note for note in report["guidance"])

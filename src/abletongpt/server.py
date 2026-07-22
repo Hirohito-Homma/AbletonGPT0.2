@@ -17,6 +17,7 @@ from .audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    extract_spectral_bands,
     extract_spectral_features,
     segment_structure,
     track_beats,
@@ -126,13 +127,14 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF onset/transient detection (requires the audio extra: NumPy)",
             "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
             "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
+            "offline WAV/AIFF tonal band-balance (level-independent) (requires the audio extra: NumPy)",
             "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
             "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
             "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
             "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
-            "offline mix-vs-reference comparison (loudness + tone) with plain-language guidance (requires the audio extra: NumPy)",
+            "offline mix-vs-reference comparison (loudness + tone + per-band balance) with plain-language guidance (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -444,6 +446,13 @@ def analyze_audio_spectral(file_path: str, rolloff_percent: float = 0.85) -> dic
     return extract_spectral_features(file_path, rolloff_percent=rolloff_percent)
 
 
+@mcp.tool()
+def analyze_audio_spectral_bands(file_path: str) -> dict[str, Any]:
+    """WAV/AIFFの帯域別トーンバランス(low/low_mid/mid/high_mid/highの各エネルギー比率)をオフライン抽出する。
+    レベル非依存(合計=1)なので、音量に関係なく音色バランスを比較できる。NumPy必須。読み取り専用。"""
+    return extract_spectral_bands(file_path)
+
+
 def _audio_reference_profile(file_path: str) -> dict[str, Any]:
     """Flatten a file's loudness + spectral analysis into the fields the comparator needs."""
     measurements = analyze_loudness_file(file_path)["measurements"]
@@ -456,6 +465,7 @@ def _audio_reference_profile(file_path: str) -> dict[str, Any]:
         "crest_factor_db": measurements["crest_factor_db"],
         "centroid_hz": features["spectral_centroid_hz"]["mean"],
         "rolloff_hz": features["spectral_rolloff_hz"]["mean"],
+        "bands": extract_spectral_bands(file_path)["band_fractions"],
     }
 
 
