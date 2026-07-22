@@ -6,6 +6,8 @@
     python -m abletongpt.cli.audio key --file loop.wav --json
     python -m abletongpt.cli.audio chords --file loop.wav
     python -m abletongpt.cli.audio chords --file loop.wav --window-seconds 0.25 --json
+    python -m abletongpt.cli.audio melody --file lead.wav
+    python -m abletongpt.cli.audio melody --file lead.wav --min-f0 110 --max-f0 880 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -20,7 +22,13 @@ import argparse
 import json
 import sys
 
-from ..audio import AudioDependencyError, estimate_chords, estimate_key, estimate_tempo
+from ..audio import (
+    AudioDependencyError,
+    estimate_chords,
+    estimate_key,
+    estimate_tempo,
+    extract_melody,
+)
 
 
 def _print_tempo(result: dict, *, as_json: bool) -> None:
@@ -111,6 +119,34 @@ def _cmd_key(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_melody(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "melody: %s   (%g s @ %d Hz, %g Hz-%g Hz)   [%s]"
+        % (
+            " ".join(result["note_names"]) or "(none)",
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["f0_range_hz"][0],
+            result["f0_range_hz"][1],
+            result["method"],
+        )
+    )
+    for note in result["notes"]:
+        print(
+            "  %6.2f - %6.2f s  %-4s (MIDI %3d)  (%.2f)"
+            % (
+                note["start_seconds"],
+                note["end_seconds"],
+                note["note"],
+                note["midi"],
+                note["confidence"],
+            )
+        )
+
+
 def _cmd_chords(args: argparse.Namespace) -> int:
     try:
         result = estimate_chords(args.file, window_seconds=args.window_seconds)
@@ -121,6 +157,19 @@ def _cmd_chords(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_chords(result, as_json=args.json)
+    return 0
+
+
+def _cmd_melody(args: argparse.Namespace) -> int:
+    try:
+        result = extract_melody(args.file, min_f0=args.min_f0, max_f0=args.max_f0)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_melody(result, as_json=args.json)
     return 0
 
 
@@ -158,6 +207,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chords.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     chords.set_defaults(func=_cmd_chords)
+
+    melody = sub.add_parser("melody", help="Extract a monophonic melody from an audio file.")
+    melody.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    melody.add_argument(
+        "--min-f0", type=float, default=65.0, dest="min_f0", help="Lowest pitch to track (Hz)."
+    )
+    melody.add_argument(
+        "--max-f0", type=float, default=1047.0, dest="max_f0", help="Highest pitch to track (Hz)."
+    )
+    melody.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    melody.set_defaults(func=_cmd_melody)
 
     return parser
 
