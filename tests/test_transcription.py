@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from abletongpt.transcription import (
+    build_locators_from_structure,
     build_midi_from_chords,
     build_midi_from_melody,
     build_midi_from_times,
@@ -180,3 +181,35 @@ def test_times_reject_bad_pitch_and_duration():
         build_midi_from_times([0.0], 120.0, pitch=200)
     with pytest.raises(ValueError):
         build_midi_from_times([0.0], 120.0, duration_beats=0.0)
+
+
+# --- structure -> locators ---
+
+
+def _structure(sections):
+    return {"segments": [{"start_seconds": s, "end_seconds": e, "label": lbl} for s, e, lbl in sections]}
+
+
+def test_locators_at_each_section_start_in_beats():
+    # A 0-5, B 5-10, A 10-15 @ 120 BPM (2 beats/s) -> beats 0, 10, 20.
+    structure = _structure([(0.0, 5.0, "A"), (5.0, 10.0, "B"), (10.0, 15.0, "A")])
+
+    plan = build_locators_from_structure(structure, 120.0)
+
+    assert plan["count"] == 3
+    assert [loc["time_beats"] for loc in plan["locators"]] == [0.0, 10.0, 20.0]
+    assert [loc["name"] for loc in plan["locators"]] == ["1 A", "2 B", "3 A"]
+
+
+def test_include_end_adds_final_locator():
+    structure = _structure([(0.0, 5.0, "A"), (5.0, 10.0, "B")])
+
+    plan = build_locators_from_structure(structure, 120.0, include_end=True)
+
+    assert plan["locators"][-1]["name"] == "End"
+    assert plan["locators"][-1]["time_beats"] == 20.0  # 10 s * 2 beats/s
+
+
+def test_locators_reject_bad_tempo():
+    with pytest.raises(ValueError):
+        build_locators_from_structure(_structure([(0.0, 5.0, "A")]), 0.0)

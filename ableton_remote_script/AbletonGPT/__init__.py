@@ -173,6 +173,8 @@ class AbletonGPTControlSurface(ControlSurface):
                 params.get("path", []),
                 params["name"],
             )
+        if command == "add_locators":
+            return self._add_locators(song, params.get("locators", []))
         if command == "create_track":
             track_type = params["track_type"]
             index = int(params.get("index", -1))
@@ -1035,3 +1037,62 @@ class AbletonGPTControlSurface(ControlSurface):
                 "asynchronously -- re-check with get_track_devices"
             )
         return result
+
+    def _add_locators(self, song, locators):
+        """Add named Arrangement locators (cue points) at the given beat positions.
+
+        Strictly additive: a position that already has a cue is skipped, never toggled, so no
+        existing locator is ever deleted. The playhead is moved to each position (set_or_delete_cue
+        acts at the transport position) and restored afterwards.
+        """
+        if not isinstance(locators, list) or not locators:
+            raise ValueError("locators must be a non-empty list")
+        if len(locators) > 256:
+            raise ValueError("too many locators (max 256 per call)")
+
+        epsilon = 1e-4
+        original_time = song.current_song_time
+        created = []
+        skipped = []
+        try:
+            for locator in locators:
+                time = float(locator["time"])
+                if time < 0:
+                    raise ValueError("locator time must be non-negative")
+                name = str(locator.get("name", ""))[:100]
+
+                before_times = [float(cue.time) for cue in song.cue_points]
+                if any(abs(existing - time) <= epsilon for existing in before_times):
+                    skipped.append({"time": time, "name": name, "reason": "cue already exists"})
+                    continue
+
+                song.current_song_time = time
+                song.set_or_delete_cue()
+                after = list(song.cue_points)
+                if len(after) != len(before_times) + 1:
+                    skipped.append({"time": time, "name": name, "reason": "cue was not created"})
+                    continue
+
+                new_cue = None
+                for cue in after:
+                    cue_time = float(cue.time)
+                    if all(abs(cue_time - old) > epsilon for old in before_times):
+                        new_cue = cue
+                        break
+                actual_time = float(new_cue.time) if new_cue is not None else time
+                if new_cue is not None and name:
+                    try:
+                        new_cue.name = name
+                    except Exception:
+                        pass
+                created.append({"time": actual_time, "name": name})
+        finally:
+            song.current_song_time = original_time
+
+        return {
+            "created": created,
+            "skipped": skipped,
+            "created_count": len(created),
+            "skipped_count": len(skipped),
+            "total_cue_points": len(song.cue_points),
+        }

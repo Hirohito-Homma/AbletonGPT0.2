@@ -138,6 +138,47 @@ def build_midi_from_times(
     }
 
 
+def build_locators_from_structure(
+    structure: dict[str, Any],
+    tempo: float,
+    *,
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """Convert a ``segment_structure`` result + tempo into Arrangement-locator positions.
+
+    Each section start becomes a named locator (``"1 A"``, ``"2 B"`` ...) positioned in
+    musical beats via ``tempo``. With ``include_end`` a final ``"End"`` locator is added at
+    the last section's end. Times are relative to the Arrangement start, so this assumes the
+    analysed audio plays from bar 1 at ``tempo``.
+    """
+    if tempo <= 0.0:
+        raise ValueError("tempo must be positive")
+
+    beats_per_second = tempo / 60.0
+    locators: list[dict[str, Any]] = []
+    segments = structure.get("segments", [])
+    for index, segment in enumerate(segments):
+        start = float(segment["start_seconds"])
+        locators.append(
+            {
+                "name": "%d %s" % (index + 1, segment.get("label", "?")),
+                "time_seconds": round(start, 4),
+                "time_beats": round(start * beats_per_second, 6),
+            }
+        )
+    if include_end and segments:
+        end = float(segments[-1]["end_seconds"])
+        locators.append(
+            {
+                "name": "End",
+                "time_seconds": round(end, 4),
+                "time_beats": round(end * beats_per_second, 6),
+            }
+        )
+
+    return {"tempo": tempo, "locators": locators, "count": len(locators)}
+
+
 def _parse_chord(label: str):
     """Parse a chord label like ``C``/``Cm``/``F#`` into ``(root_pc, quality)`` or ``None``.
 

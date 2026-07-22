@@ -97,6 +97,10 @@ Script. New tools must uphold them:
 - Browser-preset loading (`load_browser_preset` → `load_preset`) is kept **strictly additive**: it
   loads one browsed item onto one track and refuses tracks that already contain an instrument, so a
   load can never replace an existing device. Browsing (`browse_device_presets`) stays read-only.
+- Arrangement-locator placement (`create_arrangement_locators_from_structure` → `add_locators`) is
+  **additive**: it skips any position that already has a cue (never toggles/deletes one) and
+  restores the playhead afterward. It uses `set_or_delete_cue`, so the no-cue-at-position guard is
+  what keeps it from deleting.
 - Device parameter changes are range-checked; Live-disabled or macro-controlled parameters are
   rejected. Always `get_track_devices` first — parameter indices/values are device-specific.
 

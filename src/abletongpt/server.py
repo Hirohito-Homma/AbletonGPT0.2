@@ -28,6 +28,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .snapshots import build_snapshot, diff_snapshots
 from .transcription import (
+    build_locators_from_structure,
     build_midi_from_chords,
     build_midi_from_melody,
     build_midi_from_times,
@@ -127,6 +128,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
             "audio-to-MIDI: rendering an extracted chord progression into an editable block-chord MIDI clip",
             "audio-to-MIDI: turning detected onsets or beats into an editable trigger-note MIDI clip",
+            "placing named Arrangement locators at detected song-structure boundaries (additive; never deletes existing locators)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -588,6 +590,43 @@ def create_midi_from_audio_rhythm(
     result["source"] = "audio_rhythm"
     result["rhythm_source"] = source
     result["note_count"] = plan["note_count"]
+    return result
+
+
+@mcp.tool()
+def plan_arrangement_locators_from_structure(
+    file_path: str,
+    tempo: float,
+    include_end: bool = False,
+    window_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """WAV/AIFFの曲構造を解析し、各セクション先頭に置くArrangementロケーター(名前・秒・拍)の計画を返す。
+    tempoで秒→拍へ変換(オーディオが1小節目からtempoで再生される前提)。include_endで末尾にEndロケーター。読み取り専用。NumPy必須。"""
+    structure = segment_structure(file_path, window_seconds=window_seconds)
+    plan = build_locators_from_structure(structure, tempo, include_end=include_end)
+    plan["segments"] = structure["segments"]
+    return plan
+
+
+@mcp.tool()
+def create_arrangement_locators_from_structure(
+    file_path: str,
+    tempo: float,
+    include_end: bool = False,
+    window_seconds: float = 1.0,
+) -> dict[str, Any]:
+    """WAV/AIFFの曲構造を解析し、Arrangementに名前付きロケーターを追加する。既にロケーターがある位置はスキップ(追加のみ・
+    既存は削除しない)。まずplan_arrangement_locators_from_structureで内容を確認すること。Remote Scriptバックエンド必須。NumPy必須。"""
+    structure = segment_structure(file_path, window_seconds=window_seconds)
+    plan = build_locators_from_structure(structure, tempo, include_end=include_end)
+    if not plan["locators"]:
+        raise ValueError("no sections detected; nothing to place")
+    bridge_locators = [
+        {"time": locator["time_beats"], "name": locator["name"]} for locator in plan["locators"]
+    ]
+    result = bridge.call("add_locators", locators=bridge_locators)
+    result["source"] = "audio_structure"
+    result["planned_count"] = plan["count"]
     return result
 
 
