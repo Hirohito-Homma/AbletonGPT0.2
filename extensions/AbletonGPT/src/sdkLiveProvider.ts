@@ -54,6 +54,72 @@ export class SdkLiveProvider {
     return { tracks };
   }
 
+  async getMidiClipNotes(params: { track_index: number; clip_index: number }): Promise<{
+    track_index: number;
+    track: string;
+    clip_index: number;
+    clip: string;
+    length_beats: number;
+    tempo: number;
+    notes: Array<{
+      pitch: number;
+      start_time: number;
+      duration: number;
+      velocity: number;
+      probability: number;
+    }>;
+    note_count: number;
+    truncated: boolean;
+  }> {
+    const trackIndex = Number(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+
+    const track = this.song.tracks[trackIndex];
+    if (!track) {
+      throw new Error("track_index is out of range");
+    }
+    if (!(track instanceof MidiTrack)) {
+      throw new Error("target track is not a MIDI track");
+    }
+    const slot = track.clipSlots[clipIndex];
+    if (!slot) {
+      throw new Error("clip_index is out of range");
+    }
+    const clip = slot.clip;
+    if (clip === null) {
+      throw new Error("target clip slot is empty");
+    }
+    if (!(clip instanceof MidiClip)) {
+      throw new Error("target clip is not a MIDI clip");
+    }
+
+    const source = clip.notes.slice(0, 4096);
+    const notes = source.map((note) => ({
+      pitch: note.pitch,
+      start_time: note.startTime,
+      duration: note.duration,
+      velocity: note.velocity ?? 100,
+      probability: note.probability ?? 1.0,
+    }));
+    return {
+      track_index: trackIndex,
+      track: track.name,
+      clip_index: clipIndex,
+      clip: clip.name,
+      length_beats: clip.duration,
+      tempo: this.song.tempo,
+      notes,
+      note_count: clip.notes.length,
+      truncated: clip.notes.length > notes.length,
+    };
+  }
+
   async getSelectedContext(): Promise<never> {
     // The SDK exposes selection only through context-menu command arguments
     // (ArrangementSelection / ClipSlotSelection), not as an ambient query.

@@ -47,6 +47,34 @@ export class MockLiveProvider extends LiveProvider {
     return { track_index: 0, clip_index: null, scene_index: 0 };
   }
 
+  async getMidiClipNotes(params) {
+    const trackIndex = Number(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+    const track = this.tracks[trackIndex];
+    const notes = [
+      { pitch: 60, start_time: 0.0, duration: 0.5, velocity: 80, probability: 1.0 },
+      { pitch: 62, start_time: 0.5, duration: 0.5, velocity: 80, probability: 1.0 },
+      { pitch: 64, start_time: 1.0, duration: 0.5, velocity: 80, probability: 1.0 },
+    ];
+    return {
+      track_index: trackIndex,
+      track: track ? track.name : "MIDI 1",
+      clip_index: clipIndex,
+      clip: "Mock Clip",
+      length_beats: 8.0,
+      tempo: this.tempo,
+      notes,
+      note_count: notes.length,
+      truncated: false,
+    };
+  }
+
   async createMidiClip(params) {
     const trackIndex = Number(params.track_index);
     const clipIndex = Number(params.clip_index);
