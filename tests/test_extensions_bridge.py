@@ -52,7 +52,7 @@ def test_extensions_bridge_round_trip() -> None:
         ExtensionsBridgeConfig(port=port, token="secret", timeout=1.0)
     )
 
-    assert bridge.call("get_tempo") == {"tempo": 120}
+    assert bridge.call("get_tempo", _timeout=2.0) == {"tempo": 120}
     thread.join(timeout=1.0)
     assert received == [
         {

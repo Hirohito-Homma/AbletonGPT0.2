@@ -2041,6 +2041,11 @@ _BROWSER_CATEGORIES = (
     "user_library",
 )
 
+# Live Browser item loading may block the Live main thread while a rack or kit is
+# instantiated. Keep the normal bridge timeout short, but allow this one explicit
+# mutation enough time to return its verified device-count result.
+_BROWSER_LOAD_TIMEOUT_SECONDS = 30.0
+
 
 @mcp.tool()
 def browse_device_presets(
@@ -2091,6 +2096,7 @@ def load_browser_preset(
         raise ValueError("path must be a list of folder-name strings")
     return bridge.call(
         "load_preset",
+        _timeout=_BROWSER_LOAD_TIMEOUT_SECONDS,
         track_index=track_index,
         category=category,
         path=list(path or []),

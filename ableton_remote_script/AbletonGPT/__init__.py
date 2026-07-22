@@ -7,6 +7,7 @@ import socket
 import threading
 from functools import partial
 
+import Live
 from _Framework.ControlSurface import ControlSurface
 
 
@@ -22,6 +23,11 @@ ALLOWED_NATIVE_INSTRUMENTS = (
     "Drum Rack",
     "Impulse",
 )
+
+# Live.Device.DeviceType.instrument. Live reports native instruments as 1 and
+# audio effects as 2. Keep the numeric value here because importing the enum is
+# not reliable across every embedded Live Python version we support.
+DEVICE_TYPE_INSTRUMENT = 1
 
 
 def create_instance(c_instance):
@@ -306,14 +312,22 @@ class AbletonGPTControlSurface(ControlSurface):
                 if start < 0.0 or start >= length or duration <= 0.0:
                     raise ValueError("note timing is outside the clip")
                 new_notes.append(
-                    {
-                        "pitch": int(note["pitch"]),
-                        "start_time": start,
-                        "duration": min(duration, length - start),
-                        "velocity": float(note.get("velocity", 100)),
-                        "probability": float(note.get("probability", 1.0)),
-                        "mute": bool(note.get("mute", False)),
-                    }
+                    self._note_specification(
+                        {
+                            "pitch": int(note["pitch"]),
+                            "start_time": start,
+                            "duration": min(duration, length - start),
+                            "velocity": float(note.get("velocity", 100)),
+                            "probability": float(note.get("probability", 1.0)),
+                            "velocity_deviation": float(
+                                note.get("velocity_deviation", 0.0)
+                            ),
+                            "release_velocity": float(
+                                note.get("release_velocity", 64.0)
+                            ),
+                            "mute": bool(note.get("mute", False)),
+                        }
+                    )
                 )
             # The extended note API (Live 11+) is required so per-note probability
             # survives the round-trip. Refuse clearly on anything older.
@@ -321,17 +335,43 @@ class AbletonGPTControlSurface(ControlSurface):
                 raise RuntimeError(
                     "applying expression requires Live 11 or later (add_new_notes API)"
                 )
-            # Replace the clip's notes in place: clear the whole clip, then add the
-            # performed notes. Note count is unchanged; the user can Undo in Live.
+            original_payload = clip.get_notes_extended(0, 128, 0.0, length)
+            original_source = (
+                original_payload.get("notes", [])
+                if isinstance(original_payload, dict)
+                else original_payload
+            )
+            original_notes = [self._note_specification(note) for note in original_source]
+            if len(original_notes) != len(new_notes):
+                raise ValueError(
+                    "expression replacement must preserve the source note count"
+                )
+
+            # The Python Remote Script API expects actual MidiNoteSpecification
+            # objects. If Live rejects the replacement after the clear, restore the
+            # exact source notes before surfacing the error.
             clip.remove_notes_extended(0, 128, 0.0, length)
-            if new_notes:
-                clip.add_new_notes({"notes": new_notes})
+            try:
+                if new_notes:
+                    clip.add_new_notes(tuple(new_notes))
+            except Exception:
+                try:
+                    clip.remove_notes_extended(0, 128, 0.0, length)
+                    if original_notes:
+                        clip.add_new_notes(tuple(original_notes))
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        "expression apply failed and source-note rollback also failed: %s"
+                        % rollback_error
+                    )
+                raise
             return {
                 "track": track.name,
                 "clip_index": index,
                 "clip": clip.name,
                 "length_beats": length,
                 "note_count": len(new_notes),
+                "rollback_protected": True,
             }
         if command == "get_audio_clip_paths":
             track_index = int(params["track_index"])
@@ -437,7 +477,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 raise ValueError("target track is not a MIDI track")
             if not hasattr(track, "insert_device"):
                 raise RuntimeError("adding instruments requires Ableton Live 12.3 or later")
-            if any(int(device.type) == 2 for device in track.devices):
+            if any(self._is_instrument(device) for device in track.devices):
                 raise ValueError("target track already contains an instrument")
             candidates = params.get("candidates") or []
             if not isinstance(candidates, list) or not candidates or len(candidates) > 8:
@@ -465,7 +505,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 if len(inserted) != 1:
                     raise RuntimeError("Live did not insert exactly one instrument")
                 device = inserted[0]
-                if int(device.type) != 2:
+                if not self._is_instrument(device):
                     raise RuntimeError("Live inserted a device that is not an instrument")
                 device_index = list(track.devices).index(device)
                 return {
@@ -793,6 +833,27 @@ class AbletonGPTControlSurface(ControlSurface):
         return song.tracks[index]
 
     @staticmethod
+    def _is_instrument(device):
+        return int(device.type) == DEVICE_TYPE_INSTRUMENT
+
+    @staticmethod
+    def _note_specification(source_note):
+        if isinstance(source_note, dict):
+            getter = source_note.get
+        else:
+            getter = lambda name, default=None: getattr(source_note, name, default)
+        return Live.Clip.MidiNoteSpecification(
+            pitch=int(getter("pitch")),
+            start_time=float(getter("start_time")),
+            duration=float(getter("duration")),
+            velocity=float(getter("velocity", 100)),
+            probability=float(getter("probability", 1.0)),
+            velocity_deviation=float(getter("velocity_deviation", 0.0)),
+            release_velocity=float(getter("release_velocity", 64.0)),
+            mute=bool(getter("mute", False)),
+        )
+
+    @staticmethod
     def _audio_clip_state(location, index, clip):
         warped = bool(clip.warping)
         state = {
@@ -1006,7 +1067,7 @@ class AbletonGPTControlSurface(ControlSurface):
         # Safety: never load onto a track that already has an instrument. Loading an
         # instrument preset there could replace the existing one (a destructive change);
         # refusing keeps every load strictly additive, mirroring add_native_device.
-        if any(int(device.type) == 2 for device in track.devices):
+        if any(self._is_instrument(device) for device in track.devices):
             raise ValueError(
                 "target track already contains an instrument; refusing to load onto it"
             )

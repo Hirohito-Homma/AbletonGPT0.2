@@ -37,7 +37,10 @@ class AbletonBridge:
     def __init__(self, config: BridgeConfig | None = None) -> None:
         self.config = config or BridgeConfig.load()
 
-    def call(self, command: str, **params: Any) -> Any:
+    def call(self, command: str, _timeout: float | None = None, **params: Any) -> Any:
+        timeout = self.config.timeout if _timeout is None else float(_timeout)
+        if timeout <= 0:
+            raise ValueError("bridge request timeout must be positive")
         request = {
             "command": command,
             "params": params,
@@ -46,9 +49,9 @@ class AbletonBridge:
         payload = (json.dumps(request, separators=(",", ":")) + "\n").encode()
         try:
             with socket.create_connection(
-                (self.config.host, self.config.port), self.config.timeout
+                (self.config.host, self.config.port), timeout
             ) as connection:
-                connection.settimeout(self.config.timeout)
+                connection.settimeout(timeout)
                 connection.sendall(payload)
                 response = self._read_line(connection)
         except (OSError, TimeoutError) as exc:
