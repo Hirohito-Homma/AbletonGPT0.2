@@ -65,6 +65,10 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
 - **`snapshots.py`** — normalizes the read-only `get_state` + `get_mix_snapshot` bridge responses
   into a stable, meter-free mix-state snapshot (`build_snapshot`) and diffs two snapshots
   (`diff_snapshots`). Pure and deterministic (timestamp passed in, not read from a clock).
+- **`transcription.py`** — bridges audio analysis to MIDI creation: `build_midi_from_melody`
+  converts an `extract_melody` result + tempo into `create_midi_clip`-ready notes in beats.
+  Pure, stdlib-only (no NumPy); the NumPy extraction stays in the server tool. Used by the
+  `plan_/create_midi_from_audio_melody` plan/create tool pair (audio-to-MIDI).
 
 ## Two separate ports — do not confuse them
 

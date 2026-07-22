@@ -27,6 +27,7 @@ from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .snapshots import build_snapshot, diff_snapshots
+from .transcription import build_midi_from_melody
 from .vocal import build_vocal_plan
 
 
@@ -119,6 +120,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
             "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
             "offline WAV/AIFF structural segmentation (requires the audio extra: NumPy)",
+            "audio-to-MIDI: transcribing an extracted monophonic melody into an editable MIDI clip",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -435,6 +437,49 @@ def analyze_audio_structure(file_path: str, window_seconds: float = 1.0) -> dict
     """WAV/AIFFを変更せず、曲構造(セクション境界・秒)をオフライン推定する。クロマ自己相似行列＋Footeノベルティで
     境界を検出し、各セクションを和声の類似度でA/B/Cラベル付け(学習型ではない)。NumPy必須。読み取り専用。"""
     return segment_structure(file_path, window_seconds=window_seconds)
+
+
+@mcp.tool()
+def plan_midi_from_audio_melody(
+    file_path: str,
+    tempo: float,
+    quantize: float = 0.0,
+    min_f0: float = 65.0,
+    max_f0: float = 1047.0,
+) -> dict[str, Any]:
+    """WAV/AIFFの単音メロディをYINで抽出し、指定tempo(BPM)でMIDIクリップ用のノート(拍単位)へ変換する計画を返す。
+    quantizeは拍グリッド(例:0.25=1/16、0=なし)。読み取り専用。create前のレビュー用。NumPy必須。"""
+    melody = extract_melody(file_path, min_f0=min_f0, max_f0=max_f0)
+    return build_midi_from_melody(melody, tempo, quantize=quantize)
+
+
+@mcp.tool()
+def create_midi_from_audio_melody(
+    file_path: str,
+    track_index: int,
+    clip_index: int,
+    tempo: float,
+    name: str = "Audio Melody",
+    quantize: float = 0.0,
+    min_f0: float = 65.0,
+    max_f0: float = 1047.0,
+) -> dict[str, Any]:
+    """WAV/AIFFの単音メロディを抽出し、空のSessionスロットへ編集可能なMIDIクリップとして書き出す(オーディオ→MIDI)。
+    既存クリップは上書きしない。まずplan_midi_from_audio_melodyで内容を確認すること。NumPy必須。"""
+    melody = extract_melody(file_path, min_f0=min_f0, max_f0=max_f0)
+    plan = build_midi_from_melody(melody, tempo, quantize=quantize)
+    _validate_midi_clip(track_index, clip_index, plan["length_beats"], plan["notes"])
+    result = bridge.call(
+        "create_midi_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        name=name[:200],
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    result["source"] = "audio_melody"
+    result["note_count"] = plan["note_count"]
+    return result
 
 
 @mcp.tool()
