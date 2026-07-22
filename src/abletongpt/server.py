@@ -27,13 +27,14 @@ from .audio import (
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
-from .harmony import build_key_compatibility, suggest_compatible_keys
+from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
 from .reference import build_reference_comparison
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
+from .transpose import build_transpose_plan, shift_to_target_pc
 from .transcription import (
     build_locators_from_structure,
     build_midi_from_chords,
@@ -144,6 +145,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "built-in genre mix/master targets to compare a mix against without a reference track (loudness + band balance; requires the audio extra: NumPy)",
             "live master-meter peak/headroom check against a built-in target's true-peak ceiling (peak-based, not LUFS; Remote Script backend only)",
             "harmonic-mixing key compatibility on the Camelot wheel (two keys or two audio files) with a 0-100 score and suggested compatible keys",
+            "transposing an existing MIDI clip by a fixed interval or to a target key/Camelot code (plan then apply; note count unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -370,6 +372,112 @@ def apply_expression(
         "diff": plan["diff"],
         "applied": applied,
         "next_step": "クリップを再生して表情を確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+_NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+
+def _resolve_transpose(
+    clip_data: dict[str, Any],
+    semitones: int,
+    target_key: str,
+    source_key: str,
+    direction: str,
+) -> dict[str, Any]:
+    """Resolve the semitone shift + a description, from either ``target_key`` or ``semitones``.
+
+    When ``target_key`` is given the shift moves the clip's tonic to that key's tonic; the source
+    tonic comes from ``source_key`` if supplied, otherwise it is detected from the clip's notes.
+    """
+    if target_key:
+        target_pc, target_mode = parse_key(target_key)
+        if source_key:
+            source_pc, source_mode = parse_key(source_key)
+            detected = False
+        else:
+            context = analyze_midi_context(clip_data)
+            key = context["musical_context"]["key"]
+            if not key:
+                raise ValueError(
+                    "could not detect a key from the clip (e.g. drums); pass source_key or use semitones"
+                )
+            source_pc = int(key["tonic_pitch_class"])
+            source_mode = str(key["mode"])
+            detected = True
+        shift = shift_to_target_pc(source_pc, target_pc, direction)
+        return {
+            "semitones": shift,
+            "mode": "to_key",
+            "source_key": "%s %s" % (_NOTE_NAMES[source_pc % 12], source_mode),
+            "target_key": "%s %s" % (_NOTE_NAMES[target_pc % 12], target_mode),
+            "source_key_detected": detected,
+            "direction": direction,
+        }
+    return {"semitones": int(semitones), "mode": "semitones"}
+
+
+@mcp.tool()
+def plan_transpose_midi(
+    track_index: int,
+    clip_index: int,
+    semitones: int = 0,
+    target_key: str = "",
+    source_key: str = "",
+    direction: str = "nearest",
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップの移調プランを作る。target_key("G major"/"Am"/Camelot"9B"など)を
+    渡すと元キー(未指定なら自動検出)からそのキーへ移調する半音数を算出、なければsemitonesをそのまま使う。
+    directionはnearest/up/down。全ノートを一定半音ずらす(=真の転調)。音域外はオクターブ折り返し。
+    ノート数不変。適用はapply_transpose_midi。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_transpose(clip_data, semitones, target_key, source_key, direction)
+    plan = build_transpose_plan(clip_data, resolution["semitones"])
+    plan["resolution"] = resolution
+    plan["next_step"] = (
+        "内容を確認し、apply_transpose_midiに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_transpose_midi(
+    track_index: int,
+    clip_index: int,
+    semitones: int = 0,
+    target_key: str = "",
+    source_key: str = "",
+    direction: str = "nearest",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_transpose_midiで確認した移調を、既存MIDIクリップのノートへ適用する。全ノートを一定半音ずらす。
+    ノート数は不変でLiveのUndoで戻せる。expected_source_fingerprintを渡すと確認後にクリップが変わっていた
+    場合は拒否する。引数はplan_transpose_midiと同じ。読み取り以外の副作用はこのクリップのノート書き換えのみ。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_transpose(clip_data, semitones, target_key, source_key, direction)
+    plan = build_transpose_plan(clip_data, resolution["semitones"])
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "resolution": resolution,
+        "semitones": plan["semitones"],
+        "note_count": plan["note_count"],
+        "folded_notes": plan["folded_notes"],
+        "result_pitch_range": plan["result_pitch_range"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }
 
 

@@ -95,6 +95,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   `suggest_compatible_keys` lists the safe ring (same/relative/±1 fifth). Pure, stdlib-only.
   Tools `analyze_key_compatibility`/`suggest_harmonic_keys` (two keys) and
   `analyze_audio_key_compatibility` (two files via `estimate_key`). Report only (never transposes).
+- **`transpose.py`** — `build_transpose_plan` shifts every note in a `get_midi_clip_notes` clip by
+  a constant semitone offset (a chromatic shift = a true key change; out-of-range notes are
+  octave-folded, note count preserved); `shift_to_target_pc` computes the offset to move a source
+  tonic to a target one. Pure, stdlib-only. The `plan_/apply_transpose_midi` pair takes explicit
+  `semitones` or a `target_key` (key name/Camelot via `harmony.parse_key`, source key detected via
+  `contextual.analyze_midi_context` unless given); apply writes back through the undoable
+  `apply_expression_to_clip` path with a fingerprint guard. Edits only the target clip's notes.
 
 ## Two separate ports — do not confuse them
 
