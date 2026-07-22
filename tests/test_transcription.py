@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from abletongpt.transcription import build_midi_from_chords, build_midi_from_melody
+from abletongpt.transcription import (
+    build_midi_from_chords,
+    build_midi_from_melody,
+    build_midi_from_times,
+)
 
 
 def _melody(notes):
@@ -131,3 +135,48 @@ def test_chords_reject_bad_octave_and_label():
         build_midi_from_chords(_chords([("C", 0.0, 1.0)]), 120.0, octave=99)
     with pytest.raises(ValueError):
         build_midi_from_chords(_chords([("H", 0.0, 1.0)]), 120.0)
+
+
+# --- rhythm (onsets/beats) ---
+
+
+def test_times_become_trigger_notes():
+    # Times at 0, 0.5, 1.0 s @ 120 BPM -> beats 0, 1, 2.
+    plan = build_midi_from_times([0.0, 0.5, 1.0], 120.0, pitch=38)
+
+    assert plan["pitch"] == 38
+    assert [note["start_time"] for note in plan["notes"]] == [0.0, 1.0, 2.0]
+    assert all(note["pitch"] == 38 and note["duration"] == 0.25 for note in plan["notes"])
+    assert plan["note_count"] == 3
+
+
+def test_strengths_scale_velocity():
+    plan = build_midi_from_times([0.0, 0.5], 120.0, velocity=100, strengths=[1.0, 0.0])
+
+    velocities = [note["velocity"] for note in plan["notes"]]
+    assert velocities[0] == 100  # full strength -> full velocity
+    assert velocities[1] == 40  # zero strength -> 40% floor
+
+
+def test_quantize_merges_collapsed_triggers_keeping_louder():
+    # Two near-simultaneous times quantised to the same 1/4 grid point merge into one.
+    plan = build_midi_from_times(
+        [0.02, 0.05], 120.0, quantize=1.0, velocity=100, strengths=[0.2, 0.9]
+    )
+
+    assert plan["note_count"] == 1
+    assert plan["notes"][0]["start_time"] == 0.0
+    assert plan["notes"][0]["velocity"] == 94  # the louder of the two survives
+
+
+def test_times_notes_are_sorted():
+    plan = build_midi_from_times([1.0, 0.0, 0.5], 120.0)
+    starts = [note["start_time"] for note in plan["notes"]]
+    assert starts == sorted(starts)
+
+
+def test_times_reject_bad_pitch_and_duration():
+    with pytest.raises(ValueError):
+        build_midi_from_times([0.0], 120.0, pitch=200)
+    with pytest.raises(ValueError):
+        build_midi_from_times([0.0], 120.0, duration_beats=0.0)
