@@ -83,6 +83,12 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   tone and stereo left unset) so a mix can be compared against a target with no reference file.
   Pure, stdlib-only; feeds the same `reference.py` comparator via the `compare_mix_to_target` tool
   (report only). Numbers are directional approximations, not measured from a specific master.
+- **`meters.py`** — `build_live_headroom_report` turns a window of Live master `output_meter_level`
+  samples (Live's momentary peak meter, 0..1 — **not** LUFS) into a peak/headroom check against a
+  `targets.py` target's true-peak ceiling. Pure, stdlib-only; the `compare_live_meter_to_target`
+  server tool samples the meter over a short window (needs the set playing; Remote Script backend
+  only — the Extensions SDK exposes no meter). Peak-based and report-only; for a calibrated LUFS
+  gap it points to the offline `compare_mix_to_target` path.
 
 ## Two separate ports — do not confuse them
 
