@@ -117,6 +117,57 @@ export class MockLiveProvider extends LiveProvider {
     return record;
   }
 
+  _track(index) {
+    const i = Number(index);
+    if (!Number.isInteger(i) || i < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    const track = this.tracks[i];
+    if (!track) {
+      throw new Error("track_index is out of range");
+    }
+    return track;
+  }
+
+  async setTempo(params) {
+    const bpm = Number(params.bpm);
+    if (!(bpm > 0)) {
+      throw new Error("bpm must be positive");
+    }
+    this.tempo = bpm;
+    return { tempo: this.tempo };
+  }
+
+  async setTrackVolume(params) {
+    const track = this._track(params.track_index);
+    track.volume = Number(params.volume);
+    return { track: track.name, volume: track.volume };
+  }
+
+  async setTrackPan(params) {
+    const track = this._track(params.track_index);
+    track.pan = Number(params.pan);
+    return { track: track.name, pan: track.pan };
+  }
+
+  async setTrackMute(params) {
+    const track = this._track(params.track_index);
+    track.mute = Boolean(params.muted);
+    return { track: track.name, muted: track.mute };
+  }
+
+  async setTrackSolo(params) {
+    const track = this._track(params.track_index);
+    track.solo = Boolean(params.soloed);
+    return { track: track.name, soloed: track.solo };
+  }
+
+  async setTrackArm(params) {
+    const track = this._track(params.track_index);
+    track.arm = Boolean(params.armed);
+    return { track: track.name, arm: track.arm };
+  }
+
   async applyExpressionToClip(params) {
     const trackIndex = Number(params.track_index);
     const clipIndex = Number(params.clip_index);

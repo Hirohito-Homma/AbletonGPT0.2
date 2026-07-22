@@ -63,7 +63,11 @@ Config (shared with the Python bridge):
 | `get_midi_clip_notes` | `midiClip.notes` (read) | returns the clip's notes + length/tempo; enables the read step of analyze/plan/apply |
 | `create_midi_clip` | `clipSlot.createMidiClip` + `midiClip.notes` | non-destructive: refuses a non-empty slot; carries per-note probability |
 | `apply_expression_to_clip` | `midiClip.notes` (wholesale replace) | replaces the notes of an existing MIDI clip; keeps probability; parity with the Remote Script backend |
+| `set_tempo` | `song.tempo =` | |
+| `set_track_volume` / `set_track_pan` | `mixer.volume` / `mixer.panning` `.setValue()` | echoes the applied value |
+| `set_track_mute` / `set_track_solo` / `set_track_arm` | `track.mute` / `solo` / `arm` setters | |
 | `get_selected_context` | **unsupported** | the SDK delivers selection only via context-menu commands, not as an ambient query |
+| `set_transport` (play/stop) | **unsupported** | the SDK exposes no transport control |
 
 `SdkLiveProvider` (`src/sdkLiveProvider.ts`) is written against the SDK's `@ableton-extensions/sdk`
 type definitions and type-checks with `npm run typecheck`. The one thing to confirm on your
