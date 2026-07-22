@@ -114,6 +114,28 @@ test("add_native_device rejects a bad name or out-of-range index", async () => {
   assert.equal(badIndex.ok, false);
 });
 
+test("get_clip_warp_markers returns markers for an audio clip", async () => {
+  // Track 1 is the audio track in the mock.
+  const response = await dispatcher().handle({
+    command: "get_clip_warp_markers",
+    params: { track_index: 1, clip_index: 0 },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.is_audio_clip, true);
+  assert.equal(response.result.marker_count, 2);
+  assert.equal(response.result.markers[0].sample_time, 0.0);
+  assert.equal(typeof response.result.warp_mode, "number");
+});
+
+test("get_clip_warp_markers rejects a MIDI track's clip", async () => {
+  // Track 0 is the MIDI track in the mock.
+  const response = await dispatcher().handle({
+    command: "get_clip_warp_markers",
+    params: { track_index: 0, clip_index: 0 },
+  });
+  assert.equal(response.ok, false);
+});
+
 test("get_midi_clip_notes returns a readable clip payload", async () => {
   const response = await dispatcher().handle({
     command: "get_midi_clip_notes",
@@ -311,6 +333,7 @@ test("the command allowlist is exactly the v1 set", () => {
       "add_native_device",
       "apply_expression_to_clip",
       "create_midi_clip",
+      "get_clip_warp_markers",
       "get_midi_clip_notes",
       "get_mix_snapshot",
       "get_selected_context",

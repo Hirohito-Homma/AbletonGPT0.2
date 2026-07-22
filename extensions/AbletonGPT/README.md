@@ -68,6 +68,7 @@ Config (shared with the Python bridge):
 | `set_track_volume` / `set_track_pan` | `mixer.volume` / `mixer.panning` `.setValue()` | echoes the applied value |
 | `set_track_mute` / `set_track_solo` / `set_track_arm` | `track.mute` / `solo` / `arm` setters | |
 | `get_track_devices` | `track.devices` / `DeviceParameter` | name + parameters (value/min/max/quantized/default). No class_name/type/is_active (not in SDK) |
+| `get_clip_warp_markers` | `AudioClip.warpMarkers` / `warping` / `warpMode` | read-only warp markers (`beat_time`/`sample_time`) of a Session audio clip. Warp-marker writing is not in the SDK (or the LOM) |
 | `add_native_device` | `track.insertDevice(name, index)` | inserts a built-in Live device by name (`index` -1 appends); verifies one device was added. No `type`/`class_display_name` in the result (not in SDK). Third-party plug-ins are rejected by the SDK |
 | `set_device_parameter` / `reset_device_parameter` | `DeviceParameter.setValue()` | range-checked; supports `normalized`; reset refuses quantized params |
 | `set_device_power` | `device.parameters[0].setValue()` | toggles Live's "Device On" (first parameter) |

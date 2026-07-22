@@ -4,6 +4,7 @@
 // layer is backend-agnostic. Every method uses only the confirmed v1.0.0 SDK surface.
 
 import {
+  AudioClip,
   type Device,
   type DeviceParameter,
   type ExtensionContext,
@@ -288,6 +289,59 @@ export class SdkLiveProvider {
       notes,
       note_count: clip.notes.length,
       truncated: clip.notes.length > notes.length,
+    };
+  }
+
+  async getClipWarpMarkers(params: { track_index: number; clip_index: number }): Promise<{
+    track: string;
+    track_index: number;
+    clip_index: number;
+    clip: string;
+    is_audio_clip: true;
+    warping: boolean;
+    warp_mode: number;
+    marker_count: number;
+    markers: Array<{ beat_time: number; sample_time: number }>;
+    read_only: true;
+  }> {
+    const trackIndex = Number(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+    const track = this.song.tracks[trackIndex];
+    if (!track) {
+      throw new Error("track_index is out of range");
+    }
+    const slot = track.clipSlots[clipIndex];
+    if (!slot) {
+      throw new Error("clip_index is out of range");
+    }
+    const clip = slot.clip;
+    if (clip === null) {
+      throw new Error("target clip slot is empty");
+    }
+    if (!(clip instanceof AudioClip)) {
+      throw new Error("target clip is not an audio clip");
+    }
+    const markers = clip.warpMarkers.map((marker) => ({
+      beat_time: marker.beatTime,
+      sample_time: marker.sampleTime,
+    }));
+    return {
+      track: track.name,
+      track_index: trackIndex,
+      clip_index: clipIndex,
+      clip: clip.name,
+      is_audio_clip: true,
+      warping: clip.warping,
+      warp_mode: Number(clip.warpMode),
+      marker_count: markers.length,
+      markers,
+      read_only: true,
     };
   }
 
