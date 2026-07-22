@@ -17,6 +17,7 @@ from .audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    extract_spectral_features,
     track_beats,
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
@@ -115,6 +116,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF monophonic melody extraction (requires the audio extra: NumPy)",
             "offline WAV/AIFF onset/transient detection (requires the audio extra: NumPy)",
             "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
+            "offline WAV/AIFF timbral spectral features (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -417,6 +419,13 @@ def analyze_audio_beats(file_path: str, beats_per_bar: int = 4) -> dict[str, Any
     """WAV/AIFFを変更せず、ビートグリッド(拍の時刻・秒)をオフライン推定する。テンポ推定＋オンセットへの位相合わせ。
     beats_per_barで小節頭(bar_start_times)もまとめる(先頭拍を1拍目と仮定・拍子検出はしない)。NumPy必須。読み取り専用。"""
     return track_beats(file_path, beats_per_bar=beats_per_bar)
+
+
+@mcp.tool()
+def analyze_audio_spectral(file_path: str, rolloff_percent: float = 0.85) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、音色のスペクトル特徴(セントロイド=明るさ・バンド幅・ロールオフ・フラットネス・
+    ゼロ交差率・RMS)をオフライン抽出する。有音フレームで平均/標準偏差/最小/最大を集計。NumPy必須。読み取り専用。"""
+    return extract_spectral_features(file_path, rolloff_percent=rolloff_percent)
 
 
 @mcp.tool()

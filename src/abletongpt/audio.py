@@ -721,3 +721,105 @@ def track_beats(
         "duration_seconds": round(signal.size / sample_rate, 3),
         "method": "onset-autocorrelation-comb-phase",
     }
+
+
+def _summary(np, values) -> dict[str, float]:
+    """Mean/std/min/max of a 1-D array, rounded, for one feature's frame distribution."""
+    return {
+        "mean": round(float(np.mean(values)), 4),
+        "std": round(float(np.std(values)), 4),
+        "min": round(float(np.min(values)), 4),
+        "max": round(float(np.max(values)), 4),
+    }
+
+
+def extract_spectral_features(
+    file_path: str,
+    *,
+    frame_size: int = 2048,
+    hop: int = 512,
+    rolloff_percent: float = 0.85,
+    silence_ratio: float = 0.05,
+) -> dict[str, Any]:
+    """Extract timbral spectral features from an audio file, offline and deterministically.
+
+    Per Hann-windowed frame it computes the spectral centroid (brightness), bandwidth
+    (spread), rolloff (the frequency below which ``rolloff_percent`` of the energy sits), and
+    flatness (tonal vs noise-like), plus the time-domain zero-crossing rate and RMS level.
+    Frames quieter than ``silence_ratio`` of the loudest frame are skipped, and each feature
+    is summarised (mean/std/min/max) over the remaining frames. Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if hop < 64 or hop > frame_size:
+        raise ValueError("hop must be between 64 and frame_size samples")
+    if not 0.0 < rolloff_percent < 1.0:
+        raise ValueError("rolloff_percent must be in (0, 1)")
+    if not 0.0 <= silence_ratio < 1.0:
+        raise ValueError("silence_ratio must be in [0, 1)")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for spectral analysis (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    window = np.hanning(frame_size)
+    starts = range(0, signal.size - frame_size + 1, hop)
+
+    magnitudes = []
+    raw_frames = []
+    for start in starts:
+        raw = signal[start : start + frame_size]
+        raw_frames.append(raw)
+        magnitudes.append(np.abs(np.fft.rfft(raw * window)))
+    magnitude = np.asarray(magnitudes)  # (n_frames, n_bins)
+    raw = np.asarray(raw_frames)  # (n_frames, frame_size)
+
+    energy = magnitude.sum(axis=1)
+    peak = float(energy.max()) if energy.size else 0.0
+    if peak <= 0.0:
+        raise ValueError("audio has no spectral energy for analysis")
+    voiced = energy > peak * silence_ratio
+    magnitude = magnitude[voiced]
+    raw = raw[voiced]
+    total = magnitude.sum(axis=1)
+
+    centroid = (magnitude * freqs).sum(axis=1) / total
+    bandwidth = np.sqrt((magnitude * (freqs - centroid[:, None]) ** 2).sum(axis=1) / total)
+
+    cumulative = np.cumsum(magnitude, axis=1)
+    thresholds = rolloff_percent * total
+    rolloff_bins = (cumulative < thresholds[:, None]).sum(axis=1)
+    rolloff = freqs[np.minimum(rolloff_bins, freqs.size - 1)]
+
+    log_mean = np.mean(np.log(magnitude + 1e-12), axis=1)
+    arithmetic_mean = np.mean(magnitude, axis=1)
+    flatness = np.exp(log_mean) / (arithmetic_mean + 1e-12)
+
+    signs = np.sign(raw)
+    zero_crossings = np.abs(np.diff(signs, axis=1)) > 0
+    zcr = zero_crossings.sum(axis=1) / (raw.shape[1] - 1)
+    rms = np.sqrt(np.mean(raw ** 2, axis=1))
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "features": {
+            "spectral_centroid_hz": _summary(np, centroid),
+            "spectral_bandwidth_hz": _summary(np, bandwidth),
+            "spectral_rolloff_hz": _summary(np, rolloff),
+            "spectral_flatness": _summary(np, flatness),
+            "zero_crossing_rate": _summary(np, zcr),
+            "rms": _summary(np, rms),
+        },
+        "rolloff_percent": rolloff_percent,
+        "frames_analyzed": int(magnitude.shape[0]),
+        "frame_size": frame_size,
+        "hop": hop,
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "method": "stft-spectral-features",
+    }

@@ -12,6 +12,8 @@
     python -m abletongpt.cli.audio onsets --file loop.wav --delta 0.05 --json
     python -m abletongpt.cli.audio beats --file loop.wav
     python -m abletongpt.cli.audio beats --file loop.wav --beats-per-bar 3 --json
+    python -m abletongpt.cli.audio spectral --file pad.wav
+    python -m abletongpt.cli.audio spectral --file pad.wav --rolloff-percent 0.95 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -33,6 +35,7 @@ from ..audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    extract_spectral_features,
     track_beats,
 )
 
@@ -231,6 +234,26 @@ def _cmd_onsets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_spectral(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "spectral features: %d frames   (%g s @ %d Hz)   [%s]"
+        % (
+            result["frames_analyzed"],
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["method"],
+        )
+    )
+    for name, stats in result["features"].items():
+        print(
+            "  %-22s mean %10.4g   std %10.4g   [%g .. %g]"
+            % (name, stats["mean"], stats["std"], stats["min"], stats["max"])
+        )
+
+
 def _cmd_beats(args: argparse.Namespace) -> int:
     try:
         result = track_beats(args.file, beats_per_bar=args.beats_per_bar)
@@ -241,6 +264,19 @@ def _cmd_beats(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_beats(result, as_json=args.json)
+    return 0
+
+
+def _cmd_spectral(args: argparse.Namespace) -> int:
+    try:
+        result = extract_spectral_features(args.file, rolloff_percent=args.rolloff_percent)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_spectral(result, as_json=args.json)
     return 0
 
 
@@ -312,6 +348,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     beats.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     beats.set_defaults(func=_cmd_beats)
+
+    spectral = sub.add_parser("spectral", help="Extract timbral spectral features from an audio file.")
+    spectral.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    spectral.add_argument(
+        "--rolloff-percent",
+        type=float,
+        default=0.85,
+        dest="rolloff_percent",
+        help="Energy fraction for the spectral rolloff frequency (0-1).",
+    )
+    spectral.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    spectral.set_defaults(func=_cmd_spectral)
 
     return parser
 
