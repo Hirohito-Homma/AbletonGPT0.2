@@ -137,6 +137,80 @@ test("control commands reject a bad track index", async () => {
   assert.match(response.error, /out of range/);
 });
 
+test("get_track_devices returns devices with parameter state", async () => {
+  const response = await dispatcher().handle({
+    command: "get_track_devices",
+    params: { track_index: 0 },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.devices[0].name, "Reverb");
+  const param = response.result.devices[0].parameters[1];
+  assert.equal(param.name, "Dry/Wet");
+  assert.equal(param.is_quantized, false);
+  assert.equal(param.default_value, 0.5);
+});
+
+test("set_device_parameter clamps to range and echoes state", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const ok = await disp.handle({
+    command: "set_device_parameter",
+    params: { track_index: 0, device_index: 0, parameter_index: 1, value: 0.8 },
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.result.parameter.value, 0.8);
+
+  const bad = await disp.handle({
+    command: "set_device_parameter",
+    params: { track_index: 0, device_index: 0, parameter_index: 1, value: 2 },
+  });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /out of range/);
+});
+
+test("set_device_parameter accepts a normalized value", async () => {
+  const response = await dispatcher().handle({
+    command: "set_device_parameter",
+    params: { track_index: 0, device_index: 0, parameter_index: 1, value: 1, normalized: true },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.parameter.value, 1); // 0 + 1*(1-0)
+});
+
+test("reset_device_parameter refuses quantized and resets continuous", async () => {
+  const quantized = await dispatcher().handle({
+    command: "reset_device_parameter",
+    params: { track_index: 0, device_index: 0, parameter_index: 0 },
+  });
+  assert.equal(quantized.ok, false);
+  assert.match(quantized.error, /quantized/);
+
+  const reset = await dispatcher().handle({
+    command: "reset_device_parameter",
+    params: { track_index: 0, device_index: 0, parameter_index: 1 },
+  });
+  assert.equal(reset.ok, true);
+  assert.equal(reset.result.parameter.value, 0.5);
+});
+
+test("set_device_power toggles the first parameter", async () => {
+  const response = await dispatcher().handle({
+    command: "set_device_power",
+    params: { track_index: 0, device_index: 0, enabled: false },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.enabled, false);
+});
+
+test("device commands reject a bad device index", async () => {
+  const response = await dispatcher().handle({
+    command: "get_track_devices",
+    params: { track_index: 1 },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.devices.length, 0); // Audio 1 has no devices
+});
+
 test("unknown command is rejected", async () => {
   const response = await dispatcher().handle({ command: "delete_everything" });
   assert.equal(response.ok, false);
@@ -168,8 +242,12 @@ test("the command allowlist is exactly the v1 set", () => {
       "get_selected_context",
       "get_state",
       "get_tempo",
+      "get_track_devices",
       "get_tracks",
       "ping",
+      "reset_device_parameter",
+      "set_device_parameter",
+      "set_device_power",
       "set_tempo",
       "set_track_arm",
       "set_track_mute",
