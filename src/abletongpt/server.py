@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
+from .meters import build_live_headroom_report
 from .reference import build_reference_comparison
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
@@ -139,6 +141,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "read-only warp-marker inspection and warp-vs-onset alignment reporting (warp-marker writing is not exposed by the Live API)",
             "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with a 0-100 match score and plain-language guidance (requires the audio extra: NumPy)",
             "built-in genre mix/master targets to compare a mix against without a reference track (loudness + band balance; requires the audio extra: NumPy)",
+            "live master-meter peak/headroom check against a built-in target's true-peak ceiling (peak-based, not LUFS; Remote Script backend only)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -515,6 +518,31 @@ def compare_mix_to_target(mix_path: str, target: str) -> dict[str, Any]:
         _audio_reference_profile(mix_path),
         target_profile,
     )
+
+
+@mcp.tool()
+def compare_live_meter_to_target(
+    target: str, seconds: float = 2.0, interval: float = 0.1
+) -> dict[str, Any]:
+    """再生中のLive Masterの瞬間メーターをwindow(既定2秒)サンプリングし、組み込みtarget(list_mix_targets)の
+    True-Peak天井に対するピーク・ヘッドルーム(dB)を返す。メーターはピーク値でありLUFSではないので、
+    ラウドネス(LUFS)の正確な比較はバウンス+compare_mix_to_targetを使うこと。再生していないと測れない。
+    Remote Scriptバックエンド専用(Extensionsはメーター非対応)。変更はしない・読み取り専用。"""
+    try:
+        target_profile = get_target(target)
+    except KeyError as error:
+        return {"read_only": True, "error": str(error), "targets": list_targets()}
+
+    interval = max(0.02, float(interval))
+    count = max(1, int(round(float(seconds) / interval)))
+    samples: list[float | None] = []
+    for tick in range(count):
+        snapshot = bridge.call("get_mix_snapshot")
+        master = snapshot.get("master") if isinstance(snapshot, dict) else None
+        samples.append(master.get("output_meter_level") if isinstance(master, dict) else None)
+        if tick < count - 1:
+            time.sleep(interval)
+    return build_live_headroom_report(samples, target_profile)
 
 
 @mcp.tool()
