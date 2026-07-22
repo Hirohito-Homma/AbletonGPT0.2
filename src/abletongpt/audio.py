@@ -1,4 +1,4 @@
-"""Offline audio-track feature extraction (tempo, ... ).
+"""Offline audio-track feature extraction (tempo, key, ... ).
 
 Like :mod:`abletongpt.loudness`, this reads a WAV/AIFF file and never writes. Unlike the
 rest of the package it needs an optional dependency, NumPy, for the DSP -- install it with
@@ -131,4 +131,99 @@ def estimate_tempo(
         "duration_seconds": round(signal.size / sample_rate, 3),
         "bpm_range": [min_bpm, max_bpm],
         "method": "onset-autocorrelation",
+    }
+
+
+# Pitch-class names, index 0 == C. Sharps only, matching how Live labels roots.
+_NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+# Krumhansl-Schmuckler key profiles: the perceived tonal hierarchy of each scale
+# degree, index 0 == tonic. Rotating these to every tonic gives the 24 candidate keys.
+_KS_MAJOR = (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
+_KS_MINOR = (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
+
+
+def _pearson(np, a, b) -> float:
+    """Pearson correlation of two equal-length vectors; 0 when either is constant."""
+    a = a - a.mean()
+    b = b - b.mean()
+    denom = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    return float((a * b).sum() / denom) if denom else 0.0
+
+
+def estimate_key(
+    file_path: str,
+    *,
+    frame_size: int = 4096,
+    min_freq: float = 55.0,
+    max_freq: float = 5000.0,
+) -> dict[str, Any]:
+    """Estimate the musical key of an audio file, offline and deterministically.
+
+    Method: a self-written DFT chromagram (Hann-windowed FFT frames, each magnitude bin
+    folded into its nearest pitch class), then Krumhansl-Schmuckler correlation of the
+    12-bin chroma against all 24 rotated major/minor key profiles. The best correlation is
+    the key. Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if frame_size < 512 or frame_size & (frame_size - 1):
+        raise ValueError("frame_size must be a power of two of at least 512")
+    if not 0.0 < min_freq < max_freq:
+        raise ValueError("require 0 < min_freq < max_freq")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for key estimation (need at least ~1 second)")
+    if signal.size < frame_size:
+        raise ValueError("audio is shorter than one analysis frame")
+
+    # Precompute the FFT-bin -> pitch-class map for the usable frequency band.
+    freqs = np.fft.rfftfreq(frame_size, 1.0 / sample_rate)
+    band = (freqs >= min_freq) & (freqs <= min(max_freq, sample_rate / 2.0))
+    if not np.any(band):
+        raise ValueError("no FFT bins fall inside the requested frequency band")
+    with np.errstate(divide="ignore"):
+        midi = 69.0 + 12.0 * np.log2(np.where(freqs > 0.0, freqs, 1.0) / 440.0)
+    pitch_class = np.mod(np.rint(midi).astype(int), 12)
+
+    # Hann-windowed overlapping frames, magnitude spectrum summed into 12 pitch classes.
+    window = np.hanning(frame_size)
+    hop = frame_size // 2
+    chroma = np.zeros(12, dtype=np.float64)
+    for start in range(0, signal.size - frame_size + 1, hop):
+        frame = signal[start : start + frame_size] * window
+        magnitude = np.abs(np.fft.rfft(frame))
+        chroma += np.bincount(
+            pitch_class[band], weights=magnitude[band], minlength=12
+        )
+
+    if not np.any(chroma):
+        raise ValueError("audio has no tonal content for key estimation")
+    chroma_norm = chroma / chroma.sum()
+
+    major = np.asarray(_KS_MAJOR, dtype=np.float64)
+    minor = np.asarray(_KS_MINOR, dtype=np.float64)
+    scored: list[tuple[float, int, str]] = []
+    for tonic in range(12):
+        scored.append((_pearson(np, chroma_norm, np.roll(major, tonic)), tonic, "major"))
+        scored.append((_pearson(np, chroma_norm, np.roll(minor, tonic)), tonic, "minor"))
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    best_corr, best_tonic, best_mode = scored[0]
+    alt_corr, alt_tonic, alt_mode = scored[1]
+    tonic_name = _NOTE_NAMES[best_tonic]
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "key": "%s %s" % (tonic_name, best_mode),
+        "tonic": tonic_name,
+        "mode": best_mode,
+        "confidence": round(max(0.0, min(1.0, best_corr)), 4),
+        "alternative_key": "%s %s" % (_NOTE_NAMES[alt_tonic], alt_mode),
+        "alternative_confidence": round(max(0.0, min(1.0, alt_corr)), 4),
+        "chroma": [round(float(value), 4) for value in chroma_norm],
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "method": "chroma-krumhansl-schmuckler",
     }

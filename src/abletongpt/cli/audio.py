@@ -2,12 +2,14 @@
 
     python -m abletongpt.cli.audio tempo --file loop.wav
     python -m abletongpt.cli.audio tempo --file loop.wav --min-bpm 80 --max-bpm 160 --json
+    python -m abletongpt.cli.audio key --file loop.wav
+    python -m abletongpt.cli.audio key --file loop.wav --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
 :mod:`abletongpt.audio` engine, which needs the optional ``audio`` extra (NumPy);
 install it with ``pip install abletongpt[audio]``. Subcommands grow as extractors are
-added (``key`` etc.).
+added.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import argparse
 import json
 import sys
 
-from ..audio import AudioDependencyError, estimate_tempo
+from ..audio import AudioDependencyError, estimate_key, estimate_tempo
 
 
 def _print_tempo(result: dict, *, as_json: bool) -> None:
@@ -37,6 +39,24 @@ def _print_tempo(result: dict, *, as_json: bool) -> None:
     )
 
 
+def _print_key(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "key: %s  (confidence %.2f)   alt %s (%.2f)   %g s @ %d Hz   [%s]"
+        % (
+            result["key"],
+            result["confidence"],
+            result["alternative_key"],
+            result["alternative_confidence"],
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["method"],
+        )
+    )
+
+
 def _cmd_tempo(args: argparse.Namespace) -> int:
     try:
         result = estimate_tempo(args.file, min_bpm=args.min_bpm, max_bpm=args.max_bpm)
@@ -47,6 +67,19 @@ def _cmd_tempo(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_tempo(result, as_json=args.json)
+    return 0
+
+
+def _cmd_key(args: argparse.Namespace) -> int:
+    try:
+        result = estimate_key(args.file)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_key(result, as_json=args.json)
     return 0
 
 
@@ -67,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tempo.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     tempo.set_defaults(func=_cmd_tempo)
+
+    key = sub.add_parser("key", help="Estimate the musical key of an audio file.")
+    key.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    key.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    key.set_defaults(func=_cmd_key)
 
     return parser
 
