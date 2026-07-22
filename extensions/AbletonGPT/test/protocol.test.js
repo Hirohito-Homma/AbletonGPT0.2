@@ -168,12 +168,93 @@ test("apply_expression_to_clip records a note replacement", async () => {
       track_index: 0,
       clip_index: 0,
       length_beats: 8,
-      notes: [{ pitch: 60, start_time: 0, duration: 1, velocity: 90, probability: 0.8 }],
+      notes: [
+        { pitch: 60, start_time: 0, duration: 1, velocity: 90, probability: 0.8 },
+        { pitch: 62, start_time: 1, duration: 1, velocity: 90, probability: 0.8 },
+        { pitch: 64, start_time: 2, duration: 1, velocity: 90, probability: 0.8 },
+      ],
     },
   });
   assert.equal(response.ok, true);
-  assert.equal(response.result.note_count, 1);
+  assert.equal(response.result.source_note_count, 3);
+  assert.equal(response.result.note_count, 3);
+  assert.equal(response.result.note_count_changed, false);
   assert.equal(provider.appliedExpressions.length, 1);
+});
+
+test("apply_expression_to_clip rejects an implicit note-count change", async () => {
+  const response = await dispatcher().handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      notes: [{ pitch: 60, start_time: 0, duration: 1 }],
+    },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /preserve the source note count/);
+});
+
+test("apply_expression_to_clip allows a reviewed note-count change", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const response = await disp.handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      expected_source_note_count: 3,
+      allow_note_count_change: true,
+      notes: [
+        { pitch: 60, start_time: 0, duration: 0.5 },
+        { pitch: 60, start_time: 0.5, duration: 0.5 },
+        { pitch: 62, start_time: 1, duration: 0.5 },
+        { pitch: 62, start_time: 1.5, duration: 0.5 },
+        { pitch: 64, start_time: 2, duration: 0.5 },
+        { pitch: 64, start_time: 2.5, duration: 0.5 },
+      ],
+    },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.source_note_count, 3);
+  assert.equal(response.result.note_count, 6);
+  assert.equal(response.result.note_count_changed, true);
+});
+
+test("apply_expression_to_clip rejects a stale reviewed note count", async () => {
+  const response = await dispatcher().handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      expected_source_note_count: 2,
+      allow_note_count_change: true,
+      notes: [
+        { pitch: 60, start_time: 0, duration: 0.5 },
+        { pitch: 60, start_time: 0.5, duration: 0.5 },
+      ],
+    },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /note count changed before apply/);
+});
+
+test("apply_expression_to_clip rejects an invalid reviewed note count", async () => {
+  const response = await dispatcher().handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      expected_source_note_count: 1.5,
+      allow_note_count_change: true,
+      notes: [
+        { pitch: 60, start_time: 0, duration: 0.5 },
+        { pitch: 60, start_time: 0.5, duration: 0.5 },
+      ],
+    },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /must be a non-negative integer/);
 });
 
 test("apply_expression_to_clip rejects a bad target", async () => {

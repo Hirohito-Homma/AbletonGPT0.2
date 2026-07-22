@@ -891,6 +891,7 @@ def _apply_note_edit(
     clip_index: int,
     plan: dict[str, Any],
     expected_source_fingerprint: str,
+    allow_note_count_change: bool = False,
 ) -> dict[str, Any]:
     """Guard the source fingerprint, validate, and write a note-edit plan back to the clip."""
     if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
@@ -903,6 +904,8 @@ def _apply_note_edit(
         clip_index=clip_index,
         length_beats=length,
         notes=plan["notes"],
+        expected_source_note_count=plan["source_note_count"],
+        allow_note_count_change=allow_note_count_change,
     )
 
 
@@ -972,7 +975,13 @@ def apply_split_notes(
         raise ValueError("indices must be non-negative")
     clip_data = _read_midi_clip(track_index, clip_index)
     plan = build_split_plan(clip_data, divisions)
-    applied = _apply_note_edit(track_index, clip_index, plan, expected_source_fingerprint)
+    applied = _apply_note_edit(
+        track_index,
+        clip_index,
+        plan,
+        expected_source_fingerprint,
+        allow_note_count_change=True,
+    )
     return {
         "divisions": plan["divisions"],
         "source_note_count": plan["source_note_count"],

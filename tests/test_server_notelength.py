@@ -58,6 +58,9 @@ def test_plan_legato_is_read_only(fake_bridge):
 def test_apply_legato_writes_back(fake_bridge):
     result = server.apply_legato_clip(0, 0)
     assert fake_bridge.calls[-1][0] == "apply_expression_to_clip"
+    write = fake_bridge.calls[-1][1]
+    assert write["expected_source_note_count"] == 2
+    assert write["allow_note_count_change"] is False
     assert result["note_count"] == 2
 
 
@@ -65,6 +68,8 @@ def test_apply_split_multiplies_notes(fake_bridge):
     result = server.apply_split_notes(0, 0, divisions=2)
     write = fake_bridge.calls[-1][1]
     assert len(write["notes"]) == 4  # 2 notes x 2
+    assert write["expected_source_note_count"] == 2
+    assert write["allow_note_count_change"] is True
     assert result["note_count"] == 4
     assert result["source_note_count"] == 2
 

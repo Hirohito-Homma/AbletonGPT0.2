@@ -42,6 +42,11 @@ export class MockLiveProvider extends LiveProvider {
     this.createdClips = [];
     // Records expression note-replacements applied to clips.
     this.appliedExpressions = [];
+    this.midiClipNotes = [
+      { pitch: 60, start_time: 0.0, duration: 0.5, velocity: 80, probability: 1.0 },
+      { pitch: 62, start_time: 0.5, duration: 0.5, velocity: 80, probability: 1.0 },
+      { pitch: 64, start_time: 1.0, duration: 0.5, velocity: 80, probability: 1.0 },
+    ];
     // Canned devices per track index, with mutable parameter values.
     this.deviceState = {
       0: [
@@ -222,11 +227,7 @@ export class MockLiveProvider extends LiveProvider {
       throw new Error("clip_index must be a non-negative integer");
     }
     const track = this.tracks[trackIndex];
-    const notes = [
-      { pitch: 60, start_time: 0.0, duration: 0.5, velocity: 80, probability: 1.0 },
-      { pitch: 62, start_time: 0.5, duration: 0.5, velocity: 80, probability: 1.0 },
-      { pitch: 64, start_time: 1.0, duration: 0.5, velocity: 80, probability: 1.0 },
-    ];
+    const notes = this.midiClipNotes.map((note) => ({ ...note }));
     return {
       track_index: trackIndex,
       track: track ? track.name : "MIDI 1",
@@ -384,10 +385,37 @@ export class MockLiveProvider extends LiveProvider {
       throw new Error("clip_index must be a non-negative integer");
     }
     const notes = Array.isArray(params.notes) ? params.notes : [];
+    const sourceNoteCount = this.midiClipNotes.length;
+    const allowNoteCountChange = params.allow_note_count_change === true;
+    const expectedSourceNoteCount = Number(params.expected_source_note_count);
+    if (
+      params.expected_source_note_count != null &&
+      (!Number.isInteger(expectedSourceNoteCount) || expectedSourceNoteCount < 0)
+    ) {
+      throw new Error("expected_source_note_count must be a non-negative integer");
+    }
+    if (
+      params.expected_source_note_count != null &&
+      sourceNoteCount !== expectedSourceNoteCount
+    ) {
+      throw new Error("source MIDI clip note count changed before apply");
+    }
+    if (sourceNoteCount !== notes.length && !allowNoteCountChange) {
+      throw new Error("expression replacement must preserve the source note count");
+    }
+    if (allowNoteCountChange && params.expected_source_note_count == null) {
+      throw new Error("note-count-changing replacement requires expected_source_note_count");
+    }
+    if (allowNoteCountChange && sourceNoteCount > 0 && notes.length === 0) {
+      throw new Error("note-count-changing replacement may not clear the clip");
+    }
+    this.midiClipNotes = notes.map((note) => ({ ...note }));
     const record = {
       track_index: trackIndex,
       clip_index: clipIndex,
+      source_note_count: sourceNoteCount,
       note_count: notes.length,
+      note_count_changed: sourceNoteCount !== notes.length,
     };
     this.appliedExpressions.push(record);
     return record;

@@ -12,7 +12,8 @@ notes (the clip length never changes):
 
 Both preserve pitch/velocity/probability. Deterministic and read-only: the server tools write the
 result back through the same undoable ``apply_expression_to_clip`` path the other MIDI editors use
-(it clears and re-adds the clip's notes, so a changed note count is fine).
+(Split uses an explicit note-count-change flag and the reviewed source-note count; all other edits
+retain the default count-preserving guard).
 """
 
 from __future__ import annotations
@@ -96,6 +97,7 @@ def build_legato_plan(clip_data: dict[str, Any], gate: float = 1.0) -> dict[str,
         "read_only": True,
         "operation": "legato",
         "gate": gate,
+        "source_note_count": len(raw_notes),
         "note_count": len(edited_notes),
         "changed_notes": changed_notes,
         "length_beats": length,
