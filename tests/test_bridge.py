@@ -14,6 +14,7 @@ class FakeConnection:
     def __init__(self, response):
         self.response = response
         self.sent = b""
+        self.timeout = None
 
     def __enter__(self):
         return self
@@ -21,8 +22,8 @@ class FakeConnection:
     def __exit__(self, *_args):
         return False
 
-    def settimeout(self, _timeout):
-        pass
+    def settimeout(self, timeout):
+        self.timeout = timeout
 
     def sendall(self, payload):
         self.sent += payload
@@ -45,6 +46,22 @@ def test_bridge_round_trip():
     assert request["command"] == "set_tempo"
     assert request["params"] == {"bpm": 128}
     assert result == {"tempo": 128}
+
+
+def test_bridge_request_timeout_is_local_only():
+    connection = FakeConnection(
+        (json.dumps({"ok": True, "result": {"loaded": "Kit"}}) + "\n").encode()
+    )
+    bridge = AbletonBridge(BridgeConfig(timeout=1))
+    with patch(
+        "abletongpt.bridge.socket.create_connection", return_value=connection
+    ) as create_connection:
+        bridge.call("load_preset", _timeout=30.0, track_index=1, name="Kit")
+
+    create_connection.assert_called_once_with(("127.0.0.1", 9877), 30.0)
+    assert connection.timeout == 30.0
+    request = json.loads(connection.sent.decode())
+    assert request["params"] == {"track_index": 1, "name": "Kit"}
 
 
 def test_create_track_request():
