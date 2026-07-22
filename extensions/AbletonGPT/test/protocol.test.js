@@ -31,6 +31,17 @@ test("get_tracks returns the track list", async () => {
   assert.equal(response.result.tracks.length, 2);
 });
 
+test("get_midi_clip_notes returns a readable clip payload", async () => {
+  const response = await dispatcher().handle({
+    command: "get_midi_clip_notes",
+    params: { track_index: 0, clip_index: 0 },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(typeof response.result.length_beats, "number");
+  assert.equal(response.result.notes.length, response.result.note_count);
+  assert.equal(response.result.notes[0].pitch, 60);
+});
+
 test("create_midi_clip records a non-destructive mutation", async () => {
   const provider = new MockLiveProvider();
   const disp = new Dispatcher(provider, {});
@@ -105,6 +116,7 @@ test("the command allowlist is exactly the v1 set", () => {
     [
       "apply_expression_to_clip",
       "create_midi_clip",
+      "get_midi_clip_notes",
       "get_selected_context",
       "get_tempo",
       "get_tracks",
