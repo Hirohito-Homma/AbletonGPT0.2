@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 from typing import Callable, Dict, Tuple
 
-from . import arrange, compose, contextual, instruments, jobs, loudness, vocal
+from . import arrange, compose, contextual, expression, instruments, jobs, loudness, vocal
 
 #: Callable that runs a subcommand with the remaining argv and returns an exit code.
 _Handler = Callable[[list], int]
@@ -31,6 +31,10 @@ _SUBCOMMANDS: Dict[str, Tuple[_Handler, str]] = {
     "instruments": (
         instruments.main,
         "Select native instruments for a role / genre / mood.",
+    ),
+    "expression": (
+        expression.main,
+        "Add expressive performance (accent / swing / humanize) to a MIDI clip.",
     ),
     "vocal": (vocal.main, "Plan an editable AI vocal guide from lyrics."),
     "arrange": (arrange.main, "Build or validate an Arrangement-View section plan."),
