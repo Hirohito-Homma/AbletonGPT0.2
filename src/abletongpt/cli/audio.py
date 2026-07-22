@@ -14,6 +14,7 @@
     python -m abletongpt.cli.audio beats --file loop.wav --beats-per-bar 3 --json
     python -m abletongpt.cli.audio spectral --file pad.wav
     python -m abletongpt.cli.audio spectral --file pad.wav --rolloff-percent 0.95 --json
+    python -m abletongpt.cli.audio bands --file mix.wav
     python -m abletongpt.cli.audio structure --file song.wav
     python -m abletongpt.cli.audio structure --file song.wav --window-seconds 0.5 --json
 
@@ -37,6 +38,7 @@ from ..audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    extract_spectral_bands,
     extract_spectral_features,
     segment_structure,
     track_beats,
@@ -303,6 +305,35 @@ def _cmd_spectral(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_bands(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "band balance:   (%g s @ %d Hz)   [%s]"
+        % (result["duration_seconds"], result["sample_rate"], result["method"])
+    )
+    for band in result["bands"]:
+        bar = "#" * int(round(band["fraction"] * 40))
+        print(
+            "  %-9s %5.0f-%-5.0f Hz  %5.1f%%  %s"
+            % (band["name"], band["low_hz"], band["high_hz"], band["fraction"] * 100, bar)
+        )
+
+
+def _cmd_bands(args: argparse.Namespace) -> int:
+    try:
+        result = extract_spectral_bands(args.file)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_bands(result, as_json=args.json)
+    return 0
+
+
 def _cmd_structure(args: argparse.Namespace) -> int:
     try:
         result = segment_structure(args.file, window_seconds=args.window_seconds)
@@ -396,6 +427,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     spectral.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     spectral.set_defaults(func=_cmd_spectral)
+
+    bands = sub.add_parser("bands", help="Show the tonal band balance of an audio file.")
+    bands.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    bands.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    bands.set_defaults(func=_cmd_bands)
 
     structure = sub.add_parser("structure", help="Segment an audio file into sections.")
     structure.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")

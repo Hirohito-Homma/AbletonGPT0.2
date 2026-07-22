@@ -17,6 +17,7 @@ _RANGE_LU = 2.0
 _CREST_DB = 1.5
 _TRUE_PEAK_DB = 0.5
 _BRIGHTNESS_RATIO = 0.1  # 10% relative centroid difference
+_BAND_FRACTION = 0.03  # 3 percentage points of band-energy share
 
 
 def _delta(mix_value: float | None, reference_value: float | None) -> float | None:
@@ -81,6 +82,23 @@ def build_reference_comparison(
                 "Mix is spectrally %s (centroid %+.0f Hz vs the reference)."
                 % ("brighter" if brightness > 0 else "darker", brightness)
             )
+
+    # Per-band tonal balance, when both profiles carry band fractions.
+    mix_bands = mix.get("bands")
+    reference_bands = reference.get("bands")
+    if isinstance(mix_bands, dict) and isinstance(reference_bands, dict):
+        band_deltas: dict[str, float] = {}
+        for name, mix_fraction in mix_bands.items():
+            if name not in reference_bands:
+                continue
+            band_delta = round(float(mix_fraction) - float(reference_bands[name]), 4)
+            band_deltas[name] = band_delta
+            if abs(band_delta) >= _BAND_FRACTION:
+                guidance.append(
+                    "Mix has %s %s energy than the reference (%+.1f%% of the balance)."
+                    % ("more" if band_delta > 0 else "less", name.replace("_", " "), band_delta * 100)
+                )
+        deltas["bands"] = band_deltas
 
     if not guidance:
         guidance.append("Mix and reference are closely matched on the measured metrics.")
