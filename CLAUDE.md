@@ -163,6 +163,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   note count and clip length are all preserved (in-place edit). The `plan_/apply_reverse_clip` pair
   writes back via the undoable `apply_expression_to_clip` path with a fingerprint guard. Pure,
   stdlib-only.
+- **`notelength.py`** — in-place note-length editing. `build_legato_plan` sets each note's duration
+  from the gap to the next same-pitch onset (or clip end) scaled by `gate` (1.0 = legato/connect,
+  <1 = staccato); note count unchanged. `build_split_plan` divides each note into `divisions` equal
+  parts (count × divisions). Both keep pitch/velocity, same clip length. The
+  `plan_/apply_legato_clip` and `plan_/apply_split_notes` pairs write back via the undoable
+  `apply_expression_to_clip` path (which clears+re-adds, so a changed count is fine) with a
+  fingerprint guard (shared `_apply_note_edit` helper). Pure, stdlib-only.
 
 ## Two separate ports — do not confuse them
 

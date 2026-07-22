@@ -33,6 +33,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .layering import build_layering_plan
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .notelength import build_legato_plan, build_split_plan
 from .phrase import build_phrase_from_loop
 from .progression import build_progression_analysis
 from .quantize import build_quantize_plan
@@ -164,6 +165,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
+            "note-length editing of an existing MIDI clip: legato (extend notes to the next same-pitch onset, gate for legato/staccato) and split (subdivide each note into N) (plan then apply; Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -879,6 +881,102 @@ def apply_velocity_groove(
         "changed_notes": plan["changed_notes"],
         "max_velocity_delta": plan["max_velocity_delta"],
         "result_velocity_range": plan["result_velocity_range"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+def _apply_note_edit(
+    track_index: int,
+    clip_index: int,
+    plan: dict[str, Any],
+    expected_source_fingerprint: str,
+) -> dict[str, Any]:
+    """Guard the source fingerprint, validate, and write a note-edit plan back to the clip."""
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    return bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+
+
+@mcp.tool()
+def plan_legato_clip(track_index: int, clip_index: int, gate: float = 1.0) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップをレガート化(結合)するプランを作る。各ノートの長さを、同じ音高の次の
+    ノート開始(なければクリップ末尾)までのgap×gateに設定する。gate=1.0で完全に繋ぐ(レガート)、gate<1で隙間を
+    残す(スタッカート寄り)。長さのみ変更しノート数・音高は不変。適用はapply_legato_clip。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_legato_plan(clip_data, gate=gate)
+    plan["next_step"] = (
+        "内容を確認し、apply_legato_clipに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_legato_clip(
+    track_index: int,
+    clip_index: int,
+    gate: float = 1.0,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_legato_clipで確認したレガート化を、既存MIDIクリップのノートへ適用する。各ノートの長さだけを変える
+    (ノート数・音高・開始位置は不変、LiveのUndoで戻せる)。expected_source_fingerprintを渡すと確認後にクリップが
+    変わっていた場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_legato_plan(clip_data, gate=gate)
+    applied = _apply_note_edit(track_index, clip_index, plan, expected_source_fingerprint)
+    return {
+        "gate": plan["gate"],
+        "note_count": plan["note_count"],
+        "changed_notes": plan["changed_notes"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+@mcp.tool()
+def plan_split_notes(track_index: int, clip_index: int, divisions: int = 2) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップの各ノートをdivisions個の等長ノートに分割するプランを作る(2〜16)。
+    各断片は同じ音高/ベロシティを保ち、元の長さを等分する。クリップ長は不変、ノート数はdivisions倍になる。
+    適用はapply_split_notes。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_split_plan(clip_data, divisions)
+    plan["next_step"] = (
+        "内容を確認し、apply_split_notesに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_split_notes(
+    track_index: int,
+    clip_index: int,
+    divisions: int = 2,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_split_notesで確認したノート分割を、既存MIDIクリップへ適用する。各ノートをdivisions個の等長ノートに
+    分割する(音高/ベロシティ保持、クリップ長不変、ノート数はdivisions倍、LiveのUndoで戻せる)。
+    expected_source_fingerprintを渡すと確認後にクリップが変わっていた場合は拒否する。副作用はノート書き換えのみ。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_split_plan(clip_data, divisions)
+    applied = _apply_note_edit(track_index, clip_index, plan, expected_source_fingerprint)
+    return {
+        "divisions": plan["divisions"],
+        "source_note_count": plan["source_note_count"],
+        "note_count": plan["note_count"],
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }
