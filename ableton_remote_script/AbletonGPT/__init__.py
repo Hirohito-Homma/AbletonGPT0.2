@@ -266,6 +266,55 @@ class AbletonGPTControlSurface(ControlSurface):
                 "note_count": total_note_count,
                 "truncated": total_note_count > len(notes),
             }
+        if command == "apply_expression_to_clip":
+            track = self._track(song, params["track_index"])
+            if not track.has_midi_input:
+                raise ValueError("target track is not a MIDI track")
+            index = int(params["clip_index"])
+            if index < 0 or index >= len(track.clip_slots):
+                raise IndexError("clip index out of range")
+            slot = track.clip_slots[index]
+            if not slot.has_clip or not slot.clip.is_midi_clip:
+                raise ValueError("target clip slot does not contain a MIDI clip")
+            clip = slot.clip
+            length = float(clip.length)
+            incoming = params.get("notes", [])
+            if len(incoming) > 4096:
+                raise ValueError("a clip may contain at most 4096 notes per request")
+            new_notes = []
+            for note in incoming:
+                start = float(note["start_time"])
+                duration = float(note["duration"])
+                if start < 0.0 or start >= length or duration <= 0.0:
+                    raise ValueError("note timing is outside the clip")
+                new_notes.append(
+                    {
+                        "pitch": int(note["pitch"]),
+                        "start_time": start,
+                        "duration": min(duration, length - start),
+                        "velocity": float(note.get("velocity", 100)),
+                        "probability": float(note.get("probability", 1.0)),
+                        "mute": bool(note.get("mute", False)),
+                    }
+                )
+            # The extended note API (Live 11+) is required so per-note probability
+            # survives the round-trip. Refuse clearly on anything older.
+            if not hasattr(clip, "add_new_notes"):
+                raise RuntimeError(
+                    "applying expression requires Live 11 or later (add_new_notes API)"
+                )
+            # Replace the clip's notes in place: clear the whole clip, then add the
+            # performed notes. Note count is unchanged; the user can Undo in Live.
+            clip.remove_notes_extended(0, 128, 0.0, length)
+            if new_notes:
+                clip.add_new_notes({"notes": new_notes})
+            return {
+                "track": track.name,
+                "clip_index": index,
+                "clip": clip.name,
+                "length_beats": length,
+                "note_count": len(new_notes),
+            }
         if command == "get_audio_clip_paths":
             track_index = int(params["track_index"])
             track = self._track(song, track_index)

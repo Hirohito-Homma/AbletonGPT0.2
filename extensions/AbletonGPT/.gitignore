@@ -1,0 +1,12 @@
+.DS_Store
+node_modules/
+dist/
+vendor/*.tgz
+# Lockfile pins the local vendored SDK/CLI tarballs, so it is machine-specific.
+package-lock.json
+
+*.log
+*.ablx
+*.tsbuildinfo
+
+.env

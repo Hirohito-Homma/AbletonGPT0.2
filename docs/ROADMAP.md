@@ -21,7 +21,7 @@
 - Reusable song-form templates for Arrangement View
 - Preset, Pack and kit browsing with exact installed-content availability
 - Audio-track key, tempo, chord and melody extraction for contextual composition
-- Clip automation, probability and expressive MIDI editing
+- Clip automation, probability and expressive MIDI editing (expression engine and plan_expression / apply_expression landed: accent / swing / humanize / weak-beat probability are planned and applied to clip notes; MIDI CC automation is planned but not yet written back to Live)
 - Non-destructive project snapshots and rollback bundles
 
 ## Next: mix intelligence

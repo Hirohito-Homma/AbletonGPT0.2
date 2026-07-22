@@ -30,13 +30,28 @@ def main() -> None:
             print("FAIL %s: %s" % (name, exc))
 
     for module_name in (
+        "abletongpt.arrange.presets",
+        "abletongpt.backends",
         "abletongpt.bridge",
+        "abletongpt.cli.arrange",
+        "abletongpt.cli.compose",
+        "abletongpt.cli.contextual",
+        "abletongpt.cli.expression",
+        "abletongpt.cli.instruments",
+        "abletongpt.cli.jobs",
+        "abletongpt.cli.main",
+        "abletongpt.cli.serialization",
+        "abletongpt.cli.vocal",
         "abletongpt.composition",
         "abletongpt.config",
+        "abletongpt.cli.loudness",
         "abletongpt.contextual",
         "abletongpt.doctor",
+        "abletongpt.expression",
+        "abletongpt.extensions_bridge",
         "abletongpt.instruments",
         "abletongpt.jobs",
+        "abletongpt.jobs.executors",
         "abletongpt.jobs.runner",
         "abletongpt.jobs.store",
         "abletongpt.loudness",
@@ -56,7 +71,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 13, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 28, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 

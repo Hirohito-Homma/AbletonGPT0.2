@@ -6,12 +6,56 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
+from .config import setting
 from .contextual import analyze_midi_context, build_complementary_track_plan
+from .expression import AUTOMATION_SHAPES, build_expression_plan
+from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .vocal import build_vocal_plan
+
+
+#: Accepted ``backend`` config values mapped to their canonical name. The Remote Script
+#: is the default; ``extensions`` opts into the Ableton Extensions SDK companion.
+_BACKEND_ALIASES = {
+    "": "remote_script",
+    "default": "remote_script",
+    "remote": "remote_script",
+    "remote_script": "remote_script",
+    "extension": "extensions",
+    "extensions": "extensions",
+    "auto": "auto",
+}
+
+
+def resolve_backend_name() -> str:
+    """Return the canonical backend name from config/env (raises on an unknown value)."""
+    raw = str(setting("backend", "remote_script")).strip().lower()
+    if raw not in _BACKEND_ALIASES:
+        raise ValueError(
+            "unknown backend %r; use 'remote_script', 'extensions' or 'auto'" % raw
+        )
+    return _BACKEND_ALIASES[raw]
+
+
+def select_backend() -> AbletonBridge | ExtensionsBridge | FallbackBridge:
+    """Build the configured Live backend. All share the same ``call`` contract.
+
+    ``remote_script`` (default) talks to the Control Surface Remote Script; ``extensions``
+    talks to the Ableton Extensions SDK companion (Live 12 Suite Beta 12.4.5+); ``auto``
+    prefers the Extensions companion and falls back to the Remote Script if it is
+    unreachable. The connection is lazy, so selecting a backend never opens a socket on
+    its own.
+    """
+    name = resolve_backend_name()
+    if name == "extensions":
+        return ExtensionsBridge()
+    if name == "auto":
+        return FallbackBridge(ExtensionsBridge(), AbletonBridge())
+    return AbletonBridge()
 
 
 mcp = FastMCP(
@@ -23,7 +67,7 @@ mcp = FastMCP(
     host=os.getenv("ABLETONGPT_MCP_HOST", "127.0.0.1"),
     port=int(os.getenv("ABLETONGPT_MCP_PORT", "8000")),
 )
-bridge = AbletonBridge()
+bridge = select_backend()
 
 
 @mcp.tool()
@@ -32,6 +76,8 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
     return {
         "version": "0.2.0",
         "live_support": "Ableton Live 11+; native device insertion requires Live 12.3+",
+        "backend": resolve_backend_name(),
+        "available_backends": ["remote_script", "extensions", "auto"],
         "features": [
             "transport and track control",
             "beginner song sketches",
@@ -46,9 +92,11 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
+            "expressive-performance planning for a MIDI clip and applying it to the clip notes (accent/swing/humanize/probability; CC automation is plan-only for now)",
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
+            "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
             "localhost-only Ableton bridge",
@@ -184,6 +232,96 @@ def create_complementary_midi_track(
         "clip": clip,
         "instrument_selection": plan["instrument_selection"],
         "next_step": "生成結果を再生して確認し、必要ならseedを変えて別Sessionスロットへ生成してください。",
+    }
+
+
+@mcp.tool()
+def plan_expression(
+    track_index: int,
+    clip_index: int,
+    accent: float = 0.0,
+    swing: float = 0.0,
+    humanize: float = 0.0,
+    weak_beat_probability: float = 1.0,
+    beats_per_bar: int = 4,
+    grid_beats: float = 0.5,
+    automation_shape: str = "",
+    automation_cc: int = 1,
+    automation_depth: int = 64,
+    automation_base: int = 0,
+    automation_cycles: int = 1,
+    automation_resolution_beats: float = 0.25,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップへ与える表情付け（アクセント/スイング/ヒューマナイズ/裏拍確率/CCオートメーション）を計画する。適用はapply_expressionで確認後に行う。"""
+    if automation_shape and automation_shape not in AUTOMATION_SHAPES:
+        raise ValueError(
+            "automation_shape must be empty or one of %s" % ", ".join(AUTOMATION_SHAPES)
+        )
+    clip_data = _read_midi_clip(track_index, clip_index)
+    return build_expression_plan(
+        clip_data,
+        accent=accent,
+        swing=swing,
+        humanize=humanize,
+        weak_beat_probability=weak_beat_probability,
+        beats_per_bar=beats_per_bar,
+        grid_beats=grid_beats,
+        automation_shape=automation_shape or None,
+        automation_cc=automation_cc,
+        automation_depth=automation_depth,
+        automation_base=automation_base,
+        automation_cycles=automation_cycles,
+        automation_resolution_beats=automation_resolution_beats,
+        seed=seed,
+    )
+
+
+@mcp.tool()
+def apply_expression(
+    track_index: int,
+    clip_index: int,
+    accent: float = 0.0,
+    swing: float = 0.0,
+    humanize: float = 0.0,
+    weak_beat_probability: float = 1.0,
+    beats_per_bar: int = 4,
+    grid_beats: float = 0.5,
+    seed: int = 0,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_expressionで確認した表情付けを、既存MIDIクリップのノートへ適用する。ノート数は不変で、LiveのUndoで戻せる。CCオートメーションの書き戻しはまだ対象外。expected_source_fingerprintを渡すと、確認後にクリップが変わっていた場合は適用を拒否する。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_expression_plan(
+        clip_data,
+        accent=accent,
+        swing=swing,
+        humanize=humanize,
+        weak_beat_probability=weak_beat_probability,
+        beats_per_bar=beats_per_bar,
+        grid_beats=grid_beats,
+        seed=seed,
+    )
+    fingerprint = plan["source"]["fingerprint"]
+    if expected_source_fingerprint and expected_source_fingerprint != fingerprint:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["source"]["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "source": plan["source"],
+        "settings": plan["settings"],
+        "diff": plan["diff"],
+        "applied": applied,
+        "next_step": "クリップを再生して表情を確認してください。元に戻すにはLiveのUndoを使えます。",
     }
 
 
