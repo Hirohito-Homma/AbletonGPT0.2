@@ -8,6 +8,8 @@
     python -m abletongpt.cli.audio chords --file loop.wav --window-seconds 0.25 --json
     python -m abletongpt.cli.audio melody --file lead.wav
     python -m abletongpt.cli.audio melody --file lead.wav --min-f0 110 --max-f0 880 --json
+    python -m abletongpt.cli.audio onsets --file loop.wav
+    python -m abletongpt.cli.audio onsets --file loop.wav --delta 0.05 --json
 
 Read-only: measures the file and prints the result -- a human summary, or the full result
 as JSON with ``--json``. It never writes or modifies the audio. Wraps the pure
@@ -24,6 +26,7 @@ import sys
 
 from ..audio import (
     AudioDependencyError,
+    detect_onsets,
     estimate_chords,
     estimate_key,
     estimate_tempo,
@@ -160,6 +163,23 @@ def _cmd_chords(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_onsets(result: dict, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+        return
+    print(
+        "onsets: %d   (%g s @ %d Hz)   [%s]"
+        % (
+            result["onset_count"],
+            result["duration_seconds"],
+            result["sample_rate"],
+            result["method"],
+        )
+    )
+    for onset in result["onsets"]:
+        print("  %8.3f s   (strength %.2f)" % (onset["time_seconds"], onset["strength"]))
+
+
 def _cmd_melody(args: argparse.Namespace) -> int:
     try:
         result = extract_melody(args.file, min_f0=args.min_f0, max_f0=args.max_f0)
@@ -170,6 +190,19 @@ def _cmd_melody(args: argparse.Namespace) -> int:
         print("audio: %s" % exc, file=sys.stderr)
         return 2
     _print_melody(result, as_json=args.json)
+    return 0
+
+
+def _cmd_onsets(args: argparse.Namespace) -> int:
+    try:
+        result = detect_onsets(args.file, delta=args.delta)
+    except AudioDependencyError as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 3
+    except (OSError, ValueError) as exc:
+        print("audio: %s" % exc, file=sys.stderr)
+        return 2
+    _print_onsets(result, as_json=args.json)
     return 0
 
 
@@ -218,6 +251,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     melody.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     melody.set_defaults(func=_cmd_melody)
+
+    onsets = sub.add_parser("onsets", help="Detect note/transient onset times in an audio file.")
+    onsets.add_argument("--file", required=True, help="Path to a WAV/AIFF file.")
+    onsets.add_argument(
+        "--delta",
+        type=float,
+        default=0.07,
+        help="Peak-picking sensitivity threshold in [0,1); lower detects more onsets.",
+    )
+    onsets.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
+    onsets.set_defaults(func=_cmd_onsets)
 
     return parser
 

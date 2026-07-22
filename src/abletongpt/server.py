@@ -11,7 +11,13 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
-from .audio import estimate_chords, estimate_key, estimate_tempo, extract_melody
+from .audio import (
+    detect_onsets,
+    estimate_chords,
+    estimate_key,
+    estimate_tempo,
+    extract_melody,
+)
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
@@ -106,6 +112,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF key estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF chord-progression extraction (requires the audio extra: NumPy)",
             "offline WAV/AIFF monophonic melody extraction (requires the audio extra: NumPy)",
+            "offline WAV/AIFF onset/transient detection (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -395,6 +402,12 @@ def analyze_audio_chords(file_path: str, window_seconds: float = 0.5) -> dict[st
 def analyze_audio_melody(file_path: str, min_f0: float = 65.0, max_f0: float = 1047.0) -> dict[str, Any]:
     """WAV/AIFFを変更せず、単音メロディ(音符列)をYINでオフライン抽出する。単旋律前提。NumPy必須。読み取り専用。"""
     return extract_melody(file_path, min_f0=min_f0, max_f0=max_f0)
+
+
+@mcp.tool()
+def analyze_audio_onsets(file_path: str, delta: float = 0.07) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、ノート/トランジェントのオンセット時刻(秒)をオフライン検出する。deltaは感度(小さいほど鋭敏)。NumPy必須。読み取り専用。"""
+    return detect_onsets(file_path, delta=delta)
 
 
 @mcp.tool()

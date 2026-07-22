@@ -50,6 +50,19 @@ def _read_mono(path: Path):
     return signal, sample_rate
 
 
+def _onset_strength(np, signal, hop: int):
+    """Per-hop onset-strength envelope: the half-wave-rectified rise in log energy.
+
+    One value per ``hop``-sample frame. Positive where energy increases (a note/transient
+    starting), zero elsewhere. Shared by :func:`estimate_tempo` (which centres it for
+    autocorrelation) and :func:`detect_onsets` (which peak-picks it).
+    """
+    usable = signal[: (signal.size // hop) * hop]
+    energy = (usable.reshape(-1, hop) ** 2).sum(axis=1)
+    onset = np.diff(np.log1p(energy))
+    return np.maximum(onset, 0.0)
+
+
 def estimate_tempo(
     file_path: str,
     *,
@@ -73,11 +86,8 @@ def estimate_tempo(
     if signal.size < sample_rate:
         raise ValueError("audio is too short for tempo estimation (need at least ~1 second)")
 
-    # Per-hop energy -> onset strength (positive change in log-energy).
-    usable = signal[: (signal.size // hop) * hop]
-    energy = (usable.reshape(-1, hop) ** 2).sum(axis=1)
-    onset = np.diff(np.log1p(energy))
-    onset = np.maximum(onset, 0.0)
+    # Per-hop onset strength, then centre it for the autocorrelation below.
+    onset = _onset_strength(np, signal, hop)
     onset = onset - onset.mean()
     if not np.any(onset):
         raise ValueError("audio has no detectable onsets for tempo estimation")
@@ -535,4 +545,90 @@ def extract_melody(
         "sample_rate": sample_rate,
         "duration_seconds": round(duration, 3),
         "method": "yin-monophonic-pitch",
+    }
+
+
+def detect_onsets(
+    file_path: str,
+    *,
+    hop: int = 256,
+    delta: float = 0.07,
+    min_gap_seconds: float = 0.03,
+) -> dict[str, Any]:
+    """Detect note/transient onset times in an audio file, offline and deterministically.
+
+    Method: the shared per-hop onset-strength envelope (rise in log energy) is normalised,
+    then peak-picked -- a frame is an onset when it is a local maximum and rises ``delta``
+    above the local moving average, with at least ``min_gap_seconds`` since the last onset.
+    Returns onset times in seconds. Read-only; never touches Live.
+    """
+    np = _require_numpy()
+    if hop < 64:
+        raise ValueError("hop must be at least 64 samples")
+    if not 0.0 <= delta < 1.0:
+        raise ValueError("delta must be in [0, 1)")
+    if min_gap_seconds < 0.0:
+        raise ValueError("min_gap_seconds must not be negative")
+
+    signal, sample_rate = _read_mono(Path(file_path))
+    if signal.size < sample_rate:
+        raise ValueError("audio is too short for onset detection (need at least ~1 second)")
+
+    onset = _onset_strength(np, signal, hop)
+    peak = float(onset.max()) if onset.size else 0.0
+    if peak <= 0.0:
+        raise ValueError("audio has no detectable onsets")
+    envelope = onset / peak  # normalise to [0, 1] so `delta` is scale-independent
+
+    fps = sample_rate / hop
+    # Local-maximum and moving-average windows, in frames.
+    local = max(1, int(round(0.03 * fps)))
+    average = max(1, int(round(0.10 * fps)))
+    min_gap = int(round(min_gap_seconds * fps))
+
+    n = envelope.size
+    cumulative = np.concatenate(([0.0], np.cumsum(envelope)))
+    onsets: list[dict[str, Any]] = []
+    last = -min_gap - 1
+    for index in range(n):
+        lo = max(0, index - local)
+        hi = min(n, index + local + 1)
+        if envelope[index] < envelope[lo:hi].max():
+            continue
+        alo = max(0, index - average)
+        ahi = min(n, index + average + 1)
+        moving_average = (cumulative[ahi] - cumulative[alo]) / (ahi - alo)
+        if envelope[index] < moving_average + delta:
+            continue
+        if index - last <= min_gap:
+            # Keep the stronger of two peaks that fall within the guard window.
+            if onsets and envelope[index] > onsets[-1]["strength_raw"]:
+                onsets[-1] = _onset_record(index, hop, sample_rate, envelope[index])
+                last = index
+            continue
+        onsets.append(_onset_record(index, hop, sample_rate, envelope[index]))
+        last = index
+
+    for record in onsets:
+        record.pop("strength_raw", None)
+
+    return {
+        "read_only": True,
+        "file": str(file_path),
+        "onsets": onsets,
+        "onset_times": [record["time_seconds"] for record in onsets],
+        "onset_count": len(onsets),
+        "frame_seconds": round(hop / sample_rate, 5),
+        "sample_rate": sample_rate,
+        "duration_seconds": round(signal.size / sample_rate, 3),
+        "method": "log-energy-flux-peak-picking",
+    }
+
+
+def _onset_record(index: int, hop: int, sample_rate: int, strength: float) -> dict[str, Any]:
+    # Envelope frame i is the rise between hop i and i+1, so its time is (i + 1) * hop.
+    return {
+        "time_seconds": round((index + 1) * hop / sample_rate, 4),
+        "strength": round(float(strength), 4),
+        "strength_raw": float(strength),
     }
