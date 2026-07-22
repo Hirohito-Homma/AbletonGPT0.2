@@ -125,6 +125,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   line at the clip end. Pure, stdlib-only. The `plan_/apply_quantize_midi_timing` pair writes back
   via the undoable `apply_expression_to_clip` path with a fingerprint guard. Timing quantization —
   distinct from `scale.py`'s pitch quantization.
+- **`progression.py`** — `build_progression_analysis` slices a clip into fixed windows (a bar by
+  default), identifies each window's chord by energy-weighted template matching (`identify_chord`:
+  maj/min/dim/aug + 7th qualities), and labels it with a Roman numeral (chromatic roots get b/#,
+  quality sets case + °/+/7/ø7) and a rough function (tonic/subdominant/dominant) relative to a
+  key. Reuses `scale.SCALE_INTERVALS`. Read-only heuristic (each chord carries `confidence` +
+  `complete`); the `analyze_chord_progression` tool resolves the key from `key` (via
+  `harmony.parse_key`) or detects it, and derives the default window from the clip's time signature.
 
 ## Two separate ports — do not confuse them
 

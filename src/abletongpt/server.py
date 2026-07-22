@@ -31,6 +31,7 @@ from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .progression import build_progression_analysis
 from .quantize import build_quantize_plan
 from .reference import build_reference_comparison
 from .remap import build_scale_remap_plan
@@ -152,6 +153,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "scale-quantizing an existing MIDI clip: snapping out-of-scale notes to the nearest note in a key/scale (plan then apply; note count unchanged, Live-undoable)",
             "transcribing an existing MIDI chord progression to a target key/scale by scale degree (diatonic/modal remap, e.g. major->minor; plan then apply; note count unchanged, Live-undoable)",
             "quantizing an existing MIDI clip's note timing to a grid with strength and optional swing (plan then apply; only start times move, note count unchanged, Live-undoable)",
+            "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -203,6 +205,42 @@ def analyze_live_midi_clip(
     """Liveを変更せず、既存MIDIクリップのキー、役割、音域、密度、リズム、ハーモニーを解析する。"""
     clip_data = _read_midi_clip(track_index, clip_index)
     return analyze_midi_context(clip_data, source_role)
+
+
+@mcp.tool()
+def analyze_chord_progression(
+    track_index: int,
+    clip_index: int,
+    key: str = "",
+    segment_beats: float = 0.0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップのコード進行をローマ数字と和声機能(tonic/subdominant/dominant)で解析する。
+    小節ごと(segment_beats=0なら拍子から1小節、既定4拍)に鳴っている音からコード(根音+種類)をテンプレート照合で
+    同定し、キーに対する度数→ローマ数字(chromatic根音はb/#、質で大小文字・°+7ø)と機能を付ける。keyでキー指定
+    ("C"/"A minor"/Camelot"8B"等。未指定ならクリップから自動検出)。ヒューリスティックなのでconfidence/completeも返す。
+    読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    detected = False
+    if key:
+        tonic_pc, mode = parse_key(key)
+    else:
+        context = analyze_midi_context(clip_data)
+        detected_key = context["musical_context"]["key"]
+        if not detected_key:
+            raise ValueError("could not detect a key from the clip (e.g. drums); pass key explicitly")
+        tonic_pc = int(detected_key["tonic_pitch_class"])
+        mode = str(detected_key["mode"])
+        detected = True
+
+    if segment_beats <= 0.0:
+        signature = clip_data.get("time_signature") or [4, 4]
+        numerator = int(signature[0]) if signature else 4
+        denominator = int(signature[1]) if len(signature) > 1 else 4
+        segment_beats = numerator * (4.0 / denominator)  # one bar in quarter-note beats
+
+    report = build_progression_analysis(clip_data, tonic_pc, mode, segment_beats)
+    report["key_detected"] = detected
+    return report
 
 
 @mcp.tool()
