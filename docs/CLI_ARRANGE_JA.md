@@ -133,6 +133,7 @@ python -m abletongpt.cli.jobs arrange-run --list-styles
 # deep-house
 # minimal-techno
 # dub-techno
+# pop-song
 
 python -m abletongpt.cli.jobs arrange-run --describe-style deep-house
 # style: deep-house
@@ -142,6 +143,8 @@ python -m abletongpt.cli.jobs arrange-run --describe-style deep-house
 #   ...
 #   outro          bars 57-64  1:50-2:06 (0:16)
 ```
+
+`pop-song` は電子系のビルド/ドロップ型と違い、intro / verse / pre-chorus / chorus / bridge / outro の**ポップ曲形式**です。両方の verse は同じ `verse` シーンを、全 chorus は同じ `chorus` シーンを参照するので、verse と chorus を1つずつ書けば曲全体に再利用されます（既定 100 BPM・64小節）。
 
 `--describe-all-styles` で全スタイルの要約を出せます。これら一覧・詳細系は `--json` で機械可読にできます（`section_count` / `duration_seconds` / `duration_formatted` / セクション別のタイムラインを含む）。
 

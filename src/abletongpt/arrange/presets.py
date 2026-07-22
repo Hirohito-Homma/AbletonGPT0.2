@@ -88,6 +88,28 @@ DUB_TECHNO_DEFAULT_NAME = "dub_techno"
 DUB_TECHNO_DEFAULT_TEMPO = 124.0
 DUB_TECHNO_DEFAULT_BARS = 64
 
+#: pop song form: the classic verse/chorus layout rather than a build/drop dance track.
+#: Repeated sections deliberately share a source scene (both verses reuse ``verse``, every
+#: chorus reuses ``chorus``), so the template models a reusable section graph. Relative
+#: lengths sum to 64.
+_POP_SONG_SECTIONS: tuple[_SectionSpec, ...] = (
+    ("intro", "Intro", "intro", 4, "none"),
+    ("verse_1", "Verse 1", "verse", 8, "none"),
+    ("pre_chorus_1", "Pre-Chorus 1", "pre_chorus", 4, "fill"),
+    ("chorus_1", "Chorus 1", "chorus", 8, "none"),
+    ("verse_2", "Verse 2", "verse", 8, "none"),
+    ("pre_chorus_2", "Pre-Chorus 2", "pre_chorus", 4, "fill"),
+    ("chorus_2", "Chorus 2", "chorus", 8, "none"),
+    ("bridge", "Bridge", "bridge", 8, "break"),
+    ("chorus_3", "Final Chorus", "chorus", 8, "fill"),
+    ("outro", "Outro", "outro", 4, "none"),
+)
+
+#: pop-song defaults, applied when the caller leaves tempo/length unset.
+POP_SONG_DEFAULT_NAME = "pop_song"
+POP_SONG_DEFAULT_TEMPO = 100.0
+POP_SONG_DEFAULT_BARS = 64
+
 
 def _scaled_lengths(base_lengths: list[int], total_bars: int) -> list[int]:
     """Scale ``base_lengths`` so they sum to exactly ``total_bars``.
@@ -223,6 +245,28 @@ def dub_techno_arrangement(
     )
 
 
+def pop_song_arrangement(
+    name: str = POP_SONG_DEFAULT_NAME,
+    *,
+    tempo: float | None = None,
+    total_bars: int | None = None,
+) -> ArrangementPlan:
+    """Return the pop song-form arrangement under ``name``.
+
+    A verse/chorus/bridge song structure rather than a dance build/drop. Both verses reuse
+    the ``verse`` source scene and every chorus reuses the ``chorus`` scene, so one written
+    verse/chorus scene fills all its slots. Ships opinionated defaults: 100 BPM and a 64-bar
+    layout. An explicit ``tempo``/``total_bars`` (e.g. from ``--tempo``/``--bars``) overrides
+    them; leaving them unset applies the defaults.
+    """
+    return _arrangement_from_spec(
+        name,
+        _POP_SONG_SECTIONS,
+        tempo=POP_SONG_DEFAULT_TEMPO if tempo is None else tempo,
+        total_bars=POP_SONG_DEFAULT_BARS if total_bars is None else total_bars,
+    )
+
+
 # --- style registry --------------------------------------------------------------
 
 #: Builder signature shared by every style preset: ``(name, *, tempo, total_bars)``.
@@ -244,6 +288,7 @@ _STYLE_BUILDERS: dict[str, StyleBuilder] = {
     "deep-house": deep_house_arrangement,
     "minimal-techno": minimal_techno_arrangement,
     "dub-techno": dub_techno_arrangement,
+    "pop-song": pop_song_arrangement,
 }
 
 
