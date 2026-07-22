@@ -31,6 +31,9 @@ class FakeBridge:
             return {"track_index": params["track_index"], "clip_index": params["clip_index"],
                     "name": params["name"], "length_beats": params["length_beats"],
                     "note_count": len(params["notes"])}
+        if command == "add_locators":
+            return {"created": params["locators"], "created_count": len(params["locators"]),
+                    "skipped": [], "skipped_count": 0, "total_cue_points": len(params["locators"])}
         raise AssertionError("unexpected bridge command: %s" % command)
 
 
@@ -57,6 +60,14 @@ _BEATS = {
 }
 
 
+_STRUCTURE = {
+    "segments": [
+        {"start_seconds": 0.0, "end_seconds": 5.0, "label": "A"},
+        {"start_seconds": 5.0, "end_seconds": 10.0, "label": "B"},
+    ],
+}
+
+
 @pytest.fixture
 def fake_bridge(monkeypatch):
     bridge = FakeBridge()
@@ -65,6 +76,7 @@ def fake_bridge(monkeypatch):
     monkeypatch.setattr(server, "estimate_chords", lambda *args, **kwargs: dict(_CHORDS))
     monkeypatch.setattr(server, "detect_onsets", lambda *args, **kwargs: dict(_ONSETS))
     monkeypatch.setattr(server, "track_beats", lambda *args, **kwargs: dict(_BEATS))
+    monkeypatch.setattr(server, "segment_structure", lambda *args, **kwargs: dict(_STRUCTURE))
     return bridge
 
 
@@ -138,3 +150,22 @@ def test_rhythm_rejects_unknown_source(fake_bridge):
     with pytest.raises(ValueError):
         server.plan_midi_from_audio_rhythm("loop.wav", tempo=120.0, source="claps")
     assert fake_bridge.calls == []
+
+
+def test_plan_locators_is_read_only(fake_bridge):
+    plan = server.plan_arrangement_locators_from_structure("song.wav", tempo=120.0)
+
+    assert plan["count"] == 2
+    assert [loc["name"] for loc in plan["locators"]] == ["1 A", "2 B"]
+    assert [loc["time_beats"] for loc in plan["locators"]] == [0.0, 10.0]
+    assert fake_bridge.calls == []
+
+
+def test_create_locators_issues_one_add_locators(fake_bridge):
+    result = server.create_arrangement_locators_from_structure("song.wav", tempo=120.0)
+
+    assert [command for command, _ in fake_bridge.calls] == ["add_locators"]
+    _command, params = fake_bridge.calls[0]
+    assert params["locators"] == [{"time": 0.0, "name": "1 A"}, {"time": 10.0, "name": "2 B"}]
+    assert result["source"] == "audio_structure"
+    assert result["planned_count"] == 2
