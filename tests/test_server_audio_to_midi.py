@@ -34,11 +34,21 @@ class FakeBridge:
         raise AssertionError("unexpected bridge command: %s" % command)
 
 
+_CHORDS = {
+    "chords": [
+        {"chord": "C", "start_seconds": 0.0, "end_seconds": 1.0},
+        {"chord": "G", "start_seconds": 1.0, "end_seconds": 2.0},
+    ],
+    "progression": ["C", "G"],
+}
+
+
 @pytest.fixture
 def fake_bridge(monkeypatch):
     bridge = FakeBridge()
     monkeypatch.setattr(server, "bridge", bridge)
     monkeypatch.setattr(server, "extract_melody", lambda *args, **kwargs: dict(_MELODY))
+    monkeypatch.setattr(server, "estimate_chords", lambda *args, **kwargs: dict(_CHORDS))
     return bridge
 
 
@@ -67,3 +77,23 @@ def test_create_rejects_bad_target_before_bridge(fake_bridge):
     with pytest.raises(ValueError):
         server.create_midi_from_audio_melody("loop.wav", track_index=-1, clip_index=0, tempo=120.0)
     assert fake_bridge.calls == []
+
+
+def test_plan_chords_is_read_only(fake_bridge):
+    plan = server.plan_midi_from_audio_chords("loop.wav", tempo=120.0)
+
+    assert plan["source"] == "chords"
+    assert plan["chord_count"] == 2
+    assert plan["note_count"] == 6  # two triads
+    assert fake_bridge.calls == []
+
+
+def test_create_chords_issues_one_create_midi_clip(fake_bridge):
+    result = server.create_midi_from_audio_chords("loop.wav", track_index=2, clip_index=1, tempo=120.0)
+
+    assert [command for command, _ in fake_bridge.calls] == ["create_midi_clip"]
+    _command, params = fake_bridge.calls[0]
+    assert params["track_index"] == 2
+    assert len(params["notes"]) == 6
+    assert result["source"] == "audio_chords"
+    assert result["chord_count"] == 2

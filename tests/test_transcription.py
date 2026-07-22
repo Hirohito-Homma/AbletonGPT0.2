@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from abletongpt.transcription import build_midi_from_melody
+from abletongpt.transcription import build_midi_from_chords, build_midi_from_melody
 
 
 def _melody(notes):
     return {"notes": [{"midi": m, "start_seconds": s, "end_seconds": e} for m, s, e in notes]}
+
+
+def _chords(segments):
+    return {"chords": [{"chord": c, "start_seconds": s, "end_seconds": e} for c, s, e in segments]}
 
 
 def test_converts_seconds_to_beats_at_tempo():
@@ -77,3 +81,53 @@ def test_rejects_bad_quantize_and_velocity():
         build_midi_from_melody(_melody([(60, 0.0, 0.5)]), 120.0, quantize=32.0)
     with pytest.raises(ValueError):
         build_midi_from_melody(_melody([(60, 0.0, 0.5)]), 120.0, velocity=200)
+
+
+# --- chords ---
+
+
+def test_major_chord_becomes_a_triad():
+    # C at 0-2 s @ 120 BPM (= 0-4 beats). Root octave 3 -> C3 = 48, E3 = 52, G3 = 55.
+    plan = build_midi_from_chords(_chords([("C", 0.0, 2.0)]), 120.0)
+
+    assert plan["source"] == "chords"
+    assert plan["chord_count"] == 1
+    pitches = sorted(note["pitch"] for note in plan["notes"])
+    assert pitches == [48, 52, 55]
+    assert all(note["start_time"] == 0.0 and note["duration"] == 4.0 for note in plan["notes"])
+    assert plan["length_beats"] == 4.0
+
+
+def test_minor_chord_uses_a_flat_third():
+    # Am -> A2 root at octave 3 (A = pc 9 -> 12*4+9 = 57), minor third +3, fifth +7.
+    plan = build_midi_from_chords(_chords([("Am", 0.0, 1.0)]), 120.0)
+
+    assert sorted(note["pitch"] for note in plan["notes"]) == [57, 60, 64]
+
+
+def test_sharp_root_parsed():
+    plan = build_midi_from_chords(_chords([("F#", 0.0, 1.0)]), 120.0)
+    # F# = pc 6 -> 54 at octave 3; major triad 54/58/61.
+    assert sorted(note["pitch"] for note in plan["notes"]) == [54, 58, 61]
+
+
+def test_no_chord_segments_are_skipped():
+    plan = build_midi_from_chords(_chords([("C", 0.0, 1.0), ("N", 1.0, 2.0), ("G", 2.0, 3.0)]), 120.0)
+
+    assert plan["chord_count"] == 2
+    assert plan["note_count"] == 6  # two triads
+
+
+def test_octave_shifts_all_pitches():
+    low = build_midi_from_chords(_chords([("C", 0.0, 1.0)]), 120.0, octave=2)
+    high = build_midi_from_chords(_chords([("C", 0.0, 1.0)]), 120.0, octave=5)
+
+    assert min(n["pitch"] for n in low["notes"]) == 36  # C2
+    assert min(n["pitch"] for n in high["notes"]) == 72  # C5
+
+
+def test_chords_reject_bad_octave_and_label():
+    with pytest.raises(ValueError):
+        build_midi_from_chords(_chords([("C", 0.0, 1.0)]), 120.0, octave=99)
+    with pytest.raises(ValueError):
+        build_midi_from_chords(_chords([("H", 0.0, 1.0)]), 120.0)
