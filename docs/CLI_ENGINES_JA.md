@@ -217,7 +217,7 @@ next: 内容を確認後、create_complementary_midi_trackで新規MIDIトラッ
 
 ## 6. `expression` — 既存クリップの表情付け
 
-既存MIDIクリップのノート列に、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率を**決定論的に**付与します。ノートの追加・削除はせず、表情だけを差し替える計画を返す**読み取り専用**エンジンです（作曲エンジンの swing/humanize とは別で、こちらは「既存クリップの加工」用）。
+既存MIDIクリップのノート列に、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率を**決定論的に**付与します。ノートの追加・削除はせず、表情だけを差し替える計画を返す**読み取り専用**エンジンです（作曲エンジンの swing/humanize とは別で、こちらは「既存クリップの加工」用）。さらに `--automation` を付けると、同じクリップに MIDI CC のオートメーション曲線（ramp/arch/sine）をブレークポイント列として生成します。
 
 入力は `contextual` と同じクリップJSON（`length_beats` と `notes` の `{pitch, start_time, duration, velocity}`、任意で `probability`）。すべての制御は既定で無効（no-op）なので、無指定なら元のノートがそのまま返ります。
 
@@ -225,6 +225,7 @@ next: 内容を確認後、create_complementary_midi_trackで新規MIDIトラッ
 python -m abletongpt.cli.expression --clip clip.json --accent 0.6 --swing 0.4
 python -m abletongpt.cli.expression --clip clip.json --humanize 0.3 --seed 7 --json
 python -m abletongpt.cli.expression --clip clip.json --weak-beat-probability 0.7 --grid-beats 0.25
+python -m abletongpt.cli.expression --clip clip.json --automation arch --automation-cc 11 --automation-depth 100
 ```
 
 出力例:
@@ -246,10 +247,16 @@ min probability after: 1
 | `--weak-beat-probability` | | グリッド裏ノートのノート確率 0.0–1.0（既定 1.0＝無効） |
 | `--beats-per-bar` | | 拍子の分子 1–16（既定 4） |
 | `--grid-beats` | | スイング/アクセントの基準グリッド（拍）。8分なら 0.5、16分なら 0.25（既定 0.5） |
+| `--automation` | | MIDI CC オートメーション曲線の形状 `ramp_up / ramp_down / arch / sine`（既定なし） |
+| `--automation-cc` | | CC番号 0–127（既定 1＝Mod Wheel。11=Expression, 74=Filter Cutoff など） |
+| `--automation-depth` | | base からの振幅 0–127（既定 64） |
+| `--automation-base` | | 曲線の基準値 0–127（既定 0） |
+| `--automation-cycles` | | sine の周期数 1–64（クリップ全体で何周するか、既定 1） |
+| `--automation-resolution` | | ブレークポイント間隔（拍、既定 0.25） |
 | `--seed` | | 決定論シード（既定 0） |
-| `--json` | | 完全計画（notes / diff / apply_contract など）をJSONで出力 |
+| `--json` | | 完全計画（notes / automation / diff / apply_contract など）をJSONで出力 |
 
-**読み取り専用**でクリップを書き換えません。ノート数は不変で、`apply_contract` は「確認必須・ノート追加削除なし・既存クリップのノートを差し替え」を示します。実際の適用は承認後の別ツールで行います（後続実装）。ファイル無し・ノート無し・範囲外の設定値は exit 2。
+**読み取り専用**でクリップを書き換えません。ノート数は不変で、`apply_contract` は「確認必須・ノート追加削除なし・既存クリップのノートを差し替え」を示し、automation 指定時は `writes_automation_envelopes: true` も立ちます。オートメーション曲線は Live の線形補間で忠実に再現できる形状のみを提供します。実際の適用は承認後の別ツールで行います（後続実装）。ファイル無し・ノート無し・範囲外の設定値は exit 2。
 
 ---
 
