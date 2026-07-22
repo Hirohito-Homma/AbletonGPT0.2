@@ -54,6 +54,40 @@ export class SdkLiveProvider {
     return { tracks };
   }
 
+  async getState(): Promise<{
+    tempo: number;
+    scene_count: number;
+    tracks: Array<{
+      index: number;
+      name: string;
+      volume: number;
+      mute: boolean;
+      solo: boolean;
+      arm: boolean;
+      clip_slots: number;
+    }>;
+  }> {
+    const song = this.song;
+    const tracks = await Promise.all(
+      song.tracks.map(async (track, index) => ({
+        index,
+        name: track.name,
+        volume: await track.mixer.volume.getValue(),
+        mute: track.mute,
+        solo: track.solo,
+        arm: track.arm,
+        clip_slots: track.clipSlots.length,
+      })),
+    );
+    // No is_playing / signature: the SDK exposes no transport state or Song-level time
+    // signature (only per-scene signatures exist).
+    return {
+      tempo: song.tempo,
+      scene_count: song.scenes.length,
+      tracks,
+    };
+  }
+
   async getMidiClipNotes(params: { track_index: number; clip_index: number }): Promise<{
     track_index: number;
     track: string;

@@ -59,6 +59,7 @@ Config (shared with the Python bridge):
 | `ping` | — | liveness |
 | `get_tempo` | `song.tempo` | |
 | `get_tracks` | `song.tracks` | `has_midi_input` = `track instanceof MidiTrack` |
+| `get_state` | `song.tempo` / `song.scenes` / `song.tracks` | tempo, scene count, per-track name/volume/mute/solo/arm/clip_slots. No `is_playing` or `signature` (no SDK API) |
 | `get_midi_clip_notes` | `midiClip.notes` (read) | returns the clip's notes + length/tempo; enables the read step of analyze/plan/apply |
 | `create_midi_clip` | `clipSlot.createMidiClip` + `midiClip.notes` | non-destructive: refuses a non-empty slot; carries per-note probability |
 | `apply_expression_to_clip` | `midiClip.notes` (wholesale replace) | replaces the notes of an existing MIDI clip; keeps probability; parity with the Remote Script backend |

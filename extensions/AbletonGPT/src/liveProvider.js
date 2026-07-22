@@ -43,6 +43,23 @@ export class MockLiveProvider extends LiveProvider {
     return { tracks: this.tracks };
   }
 
+  async getState() {
+    // Matches SdkLiveProvider.getState: no is_playing / signature (no SDK API for them).
+    return {
+      tempo: this.tempo,
+      scene_count: 8,
+      tracks: this.tracks.map((track) => ({
+        index: track.index,
+        name: track.name,
+        volume: 0.85,
+        mute: false,
+        solo: false,
+        arm: false,
+        clip_slots: 8,
+      })),
+    };
+  }
+
   async getSelectedContext() {
     return { track_index: 0, clip_index: null, scene_index: 0 };
   }
