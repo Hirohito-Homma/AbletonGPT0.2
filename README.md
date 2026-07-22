@@ -163,6 +163,10 @@ codex mcp add abletongpt -- /absolute/path/to/repository/.venv/bin/abletongpt
 
 現在のコンテキスト作曲はMIDIクリップが対象です。音声トラックからキー、BPM、コード、メロディを抽出する機能は、LUFS解析とは別の音響解析として今後追加します。
 
+### 既存クリップの表情付け（プランのみ）
+
+既存MIDIクリップに、拍位置に応じたベロシティのアクセント・スイング・タイミング/ベロシティのヒューマナイズ・裏拍のノート確率・MIDI CCオートメーション曲線（ramp/arch/sine）を**決定論的に**与える計画を、`plan_expression`で**読み取り専用**に取得できます（ノート数は不変）。実際にクリップへ書き戻す`apply_expression`は後続で追加予定です。同じロジックはCLI [`abletongpt-cli expression`](docs/CLI_ENGINES_JA.md) でも使えます。
+
 ### AIボーカル
 
 AIボーカルは特定の非公式サービスAPIへ固定せず、次の共通フローにしています。
