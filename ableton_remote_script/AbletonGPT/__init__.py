@@ -165,6 +165,14 @@ class AbletonGPTControlSurface(ControlSurface):
                 params.get("path", []),
                 int(params.get("max_items", 200)),
             )
+        if command == "load_preset":
+            return self._load_preset(
+                song,
+                int(params["track_index"]),
+                params["category"],
+                params.get("path", []),
+                params["name"],
+            )
         if command == "create_track":
             track_type = params["track_type"]
             index = int(params.get("index", -1))
@@ -928,16 +936,14 @@ class AbletonGPTControlSurface(ControlSurface):
         "user_library",
     )
 
-    def _browse_presets(self, category, path, max_items):
+    def _resolve_browser_node(self, category, path):
+        """Return the BrowserItem at ``category`` descended through ``path`` folder names."""
         if category not in self.BROWSER_CATEGORIES:
             raise ValueError("unknown browser category: %s" % category)
-        if max_items < 1 or max_items > 1000:
-            raise ValueError("max_items must be between 1 and 1000")
         browser = self.application().browser
         node = getattr(browser, category, None)
         if node is None:
             raise ValueError("this Live version has no '%s' browser category" % category)
-
         for segment in path:
             match = None
             for child in node.children:
@@ -947,6 +953,12 @@ class AbletonGPTControlSurface(ControlSurface):
             if match is None:
                 raise ValueError("browser folder not found: %s" % segment)
             node = match
+        return node
+
+    def _browse_presets(self, category, path, max_items):
+        if max_items < 1 or max_items > 1000:
+            raise ValueError("max_items must be between 1 and 1000")
+        node = self._resolve_browser_node(category, path)
 
         items = []
         truncated = False
@@ -972,3 +984,54 @@ class AbletonGPTControlSurface(ControlSurface):
             "truncated": truncated,
             "read_only": True,
         }
+
+    def _load_preset(self, song, track_index, category, path, name):
+        track = self._track(song, track_index)
+        node = self._resolve_browser_node(category, path)
+
+        target = None
+        for child in node.children:
+            if child.name == name and not child.is_folder:
+                target = child
+                break
+        if target is None:
+            raise ValueError("preset not found: %s" % name)
+        if not getattr(target, "is_loadable", False):
+            raise ValueError("browser item is not loadable: %s" % name)
+
+        # Safety: never load onto a track that already has an instrument. Loading an
+        # instrument preset there could replace the existing one (a destructive change);
+        # refusing keeps every load strictly additive, mirroring add_native_device.
+        if any(int(device.type) == 2 for device in track.devices):
+            raise ValueError(
+                "target track already contains an instrument; refusing to load onto it"
+            )
+
+        before_count = len(track.devices)
+        browser = self.application().browser
+        song.view.selected_track = track
+        browser.load_item(target)
+
+        after_devices = list(track.devices)
+        added = len(after_devices) - before_count
+        result = {
+            "track": track.name,
+            "track_index": track_index,
+            "loaded": name,
+            "category": category,
+            "path": list(path),
+            "uri": getattr(target, "uri", None),
+            "device_count_before": before_count,
+            "device_count_after": len(after_devices),
+            "added_device_count": added,
+            "devices": [device.name for device in after_devices],
+            "verified_single_add": added == 1,
+        }
+        if added != 1:
+            # Live's browser can load asynchronously, so the device list may not reflect the
+            # new device yet. Report honestly instead of claiming success we cannot confirm.
+            result["note"] = (
+                "device count did not increase by exactly one yet; Live may load "
+                "asynchronously -- re-check with get_track_devices"
+            )
+        return result

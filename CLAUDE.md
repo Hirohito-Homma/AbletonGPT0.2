@@ -90,6 +90,9 @@ Script. New tools must uphold them:
   Live Set overwrite/save, no master export. Do not add tools that do these.
 - Native-instrument insertion is limited to an **allowlist** (`ALLOWED_NATIVE_INSTRUMENTS` in the
   Remote Script), one track per call, and refuses tracks that already have an instrument.
+- Browser-preset loading (`load_browser_preset` → `load_preset`) is kept **strictly additive**: it
+  loads one browsed item onto one track and refuses tracks that already contain an instrument, so a
+  load can never replace an existing device. Browsing (`browse_device_presets`) stays read-only.
 - Device parameter changes are range-checked; Live-disabled or macro-controlled parameters are
   rejected. Always `get_track_devices` first — parameter indices/values are device-specific.
 
