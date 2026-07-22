@@ -17,6 +17,7 @@ from .audio import (
     estimate_key,
     estimate_tempo,
     extract_melody,
+    track_beats,
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
@@ -113,6 +114,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF chord-progression extraction (requires the audio extra: NumPy)",
             "offline WAV/AIFF monophonic melody extraction (requires the audio extra: NumPy)",
             "offline WAV/AIFF onset/transient detection (requires the audio extra: NumPy)",
+            "offline WAV/AIFF beat-grid tracking (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -408,6 +410,13 @@ def analyze_audio_melody(file_path: str, min_f0: float = 65.0, max_f0: float = 1
 def analyze_audio_onsets(file_path: str, delta: float = 0.07) -> dict[str, Any]:
     """WAV/AIFFを変更せず、ノート/トランジェントのオンセット時刻(秒)をオフライン検出する。deltaは感度(小さいほど鋭敏)。NumPy必須。読み取り専用。"""
     return detect_onsets(file_path, delta=delta)
+
+
+@mcp.tool()
+def analyze_audio_beats(file_path: str, beats_per_bar: int = 4) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、ビートグリッド(拍の時刻・秒)をオフライン推定する。テンポ推定＋オンセットへの位相合わせ。
+    beats_per_barで小節頭(bar_start_times)もまとめる(先頭拍を1拍目と仮定・拍子検出はしない)。NumPy必須。読み取り専用。"""
+    return track_beats(file_path, beats_per_bar=beats_per_bar)
 
 
 @mcp.tool()
