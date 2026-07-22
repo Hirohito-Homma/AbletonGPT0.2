@@ -3,7 +3,7 @@
 // Implements the same interface as MockLiveProvider (src/liveProvider.js) so the protocol
 // layer is backend-agnostic. Every method uses only the confirmed v1.0.0 SDK surface.
 
-import { type ExtensionContext, MidiClip, MidiTrack, type NoteDescription } from "@ableton-extensions/sdk";
+import { type ExtensionContext, MidiClip, MidiTrack, type NoteDescription, Track } from "@ableton-extensions/sdk";
 
 // A note as it arrives over the wire from the Python side (snake_case).
 export type IncomingNote = {
@@ -39,6 +39,18 @@ export class SdkLiveProvider {
 
   private get song() {
     return this.context.application.song;
+  }
+
+  private requireTrack(index: number): Track<"1.0.0"> {
+    const trackIndex = Number(index);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) {
+      throw new Error("track_index must be a non-negative integer");
+    }
+    const track = this.song.tracks[trackIndex];
+    if (!track) {
+      throw new Error("track_index is out of range");
+    }
+    return track;
   }
 
   async getTempo(): Promise<{ tempo: number }> {
@@ -152,6 +164,45 @@ export class SdkLiveProvider {
       note_count: clip.notes.length,
       truncated: clip.notes.length > notes.length,
     };
+  }
+
+  async setTempo(params: { bpm: number }): Promise<{ tempo: number }> {
+    const bpm = Number(params.bpm);
+    if (!(bpm > 0)) {
+      throw new Error("bpm must be positive");
+    }
+    this.song.tempo = bpm;
+    return { tempo: this.song.tempo };
+  }
+
+  async setTrackVolume(params: { track_index: number; volume: number }): Promise<{ track: string; volume: number }> {
+    const track = this.requireTrack(params.track_index);
+    await track.mixer.volume.setValue(Number(params.volume));
+    return { track: track.name, volume: await track.mixer.volume.getValue() };
+  }
+
+  async setTrackPan(params: { track_index: number; pan: number }): Promise<{ track: string; pan: number }> {
+    const track = this.requireTrack(params.track_index);
+    await track.mixer.panning.setValue(Number(params.pan));
+    return { track: track.name, pan: await track.mixer.panning.getValue() };
+  }
+
+  async setTrackMute(params: { track_index: number; muted: boolean }): Promise<{ track: string; muted: boolean }> {
+    const track = this.requireTrack(params.track_index);
+    track.mute = Boolean(params.muted);
+    return { track: track.name, muted: track.mute };
+  }
+
+  async setTrackSolo(params: { track_index: number; soloed: boolean }): Promise<{ track: string; soloed: boolean }> {
+    const track = this.requireTrack(params.track_index);
+    track.solo = Boolean(params.soloed);
+    return { track: track.name, soloed: track.solo };
+  }
+
+  async setTrackArm(params: { track_index: number; armed: boolean }): Promise<{ track: string; arm: boolean }> {
+    const track = this.requireTrack(params.track_index);
+    track.arm = Boolean(params.armed);
+    return { track: track.name, arm: track.arm };
   }
 
   async getSelectedContext(): Promise<never> {

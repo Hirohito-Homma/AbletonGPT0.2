@@ -100,6 +100,43 @@ test("create_midi_clip rejects a bad target", async () => {
   assert.match(response.error, /track_index/);
 });
 
+test("set_tempo updates the tempo", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const response = await disp.handle({ command: "set_tempo", params: { bpm: 128 } });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.tempo, 128);
+  assert.equal(provider.tempo, 128);
+});
+
+test("set_track_mute toggles a track and echoes state", async () => {
+  const response = await dispatcher().handle({
+    command: "set_track_mute",
+    params: { track_index: 0, muted: true },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.muted, true);
+  assert.equal(response.result.track, "MIDI 1");
+});
+
+test("set_track_volume echoes the applied volume", async () => {
+  const response = await dispatcher().handle({
+    command: "set_track_volume",
+    params: { track_index: 1, volume: 0.5 },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.volume, 0.5);
+});
+
+test("control commands reject a bad track index", async () => {
+  const response = await dispatcher().handle({
+    command: "set_track_solo",
+    params: { track_index: 99, soloed: true },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /out of range/);
+});
+
 test("unknown command is rejected", async () => {
   const response = await dispatcher().handle({ command: "delete_everything" });
   assert.equal(response.ok, false);
@@ -133,6 +170,12 @@ test("the command allowlist is exactly the v1 set", () => {
       "get_tempo",
       "get_tracks",
       "ping",
+      "set_tempo",
+      "set_track_arm",
+      "set_track_mute",
+      "set_track_pan",
+      "set_track_solo",
+      "set_track_volume",
     ],
   );
 });

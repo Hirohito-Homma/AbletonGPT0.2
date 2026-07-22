@@ -20,6 +20,12 @@ const COMMANDS = {
   get_selected_context: async (provider) => provider.getSelectedContext(),
   create_midi_clip: async (provider, params) => provider.createMidiClip(params),
   apply_expression_to_clip: async (provider, params) => provider.applyExpressionToClip(params),
+  set_tempo: async (provider, params) => provider.setTempo(params),
+  set_track_volume: async (provider, params) => provider.setTrackVolume(params),
+  set_track_pan: async (provider, params) => provider.setTrackPan(params),
+  set_track_mute: async (provider, params) => provider.setTrackMute(params),
+  set_track_solo: async (provider, params) => provider.setTrackSolo(params),
+  set_track_arm: async (provider, params) => provider.setTrackArm(params),
 };
 
 export function successResponse(result) {
