@@ -27,6 +27,7 @@ from .audio import (
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
+from .groove import build_velocity_groove_plan
 from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
@@ -154,6 +155,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "transcribing an existing MIDI chord progression to a target key/scale by scale degree (diatonic/modal remap, e.g. major->minor; plan then apply; note count unchanged, Live-undoable)",
             "quantizing an existing MIDI clip's note timing to a grid with strength and optional swing (plan then apply; only start times move, note count unchanged, Live-undoable)",
             "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
+            "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -792,6 +794,83 @@ def apply_quantize_midi_timing(
         "moved_notes": plan["moved_notes"],
         "max_abs_shift_beats": plan["max_abs_shift_beats"],
         "average_abs_shift_beats": plan["average_abs_shift_beats"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+@mcp.tool()
+def plan_velocity_groove(
+    track_index: int,
+    clip_index: int,
+    crescendo: float = 0.0,
+    dynamics: float = 0.0,
+    accent_pattern: list[float] | None = None,
+    grid_beats: float = 1.0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップのベロシティ(強弱)を整形するプランを作る。crescendo(-1..1)は時間軸の
+    ランプ(+1=弱→強のクレッシェンド,-1=デクレッシェンド)。dynamics(-1..1)はダイナミクスレンジ(負=平均へ圧縮,
+    正=平均から拡張)。accent_pattern(乗数の循環リスト例[1.15,0.9,1.0,0.9])をgrid_beatsごとに適用しグルーヴを付ける。
+    ベロシティのみ変更(1..127にクランプ)、ノート数・音高・タイミング不変。expressionのメトリックアクセント/スイング
+    /ジッターとは別物。適用はapply_velocity_groove。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_velocity_groove_plan(
+        clip_data,
+        crescendo=crescendo,
+        dynamics=dynamics,
+        accent_pattern=accent_pattern,
+        grid_beats=grid_beats,
+    )
+    plan["next_step"] = (
+        "内容を確認し、apply_velocity_grooveに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_velocity_groove(
+    track_index: int,
+    clip_index: int,
+    crescendo: float = 0.0,
+    dynamics: float = 0.0,
+    accent_pattern: list[float] | None = None,
+    grid_beats: float = 1.0,
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_velocity_grooveで確認したベロシティ整形を、既存MIDIクリップのノートへ適用する。ベロシティのみを変更
+    (ノート数・音高・タイミングは不変、LiveのUndoで戻せる)。expected_source_fingerprintを渡すと確認後にクリップが
+    変わっていた場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_velocity_groove_plan(
+        clip_data,
+        crescendo=crescendo,
+        dynamics=dynamics,
+        accent_pattern=accent_pattern,
+        grid_beats=grid_beats,
+    )
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "crescendo": plan["crescendo"],
+        "dynamics": plan["dynamics"],
+        "accent_pattern": plan["accent_pattern"],
+        "grid_beats": plan["grid_beats"],
+        "note_count": plan["note_count"],
+        "changed_notes": plan["changed_notes"],
+        "max_velocity_delta": plan["max_velocity_delta"],
+        "result_velocity_range": plan["result_velocity_range"],
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }

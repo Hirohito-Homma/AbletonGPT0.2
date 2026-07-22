@@ -132,6 +132,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   key. Reuses `scale.SCALE_INTERVALS`. Read-only heuristic (each chord carries `confidence` +
   `complete`); the `analyze_chord_progression` tool resolves the key from `key` (via
   `harmony.parse_key`) or detects it, and derives the default window from the clip's time signature.
+- **`groove.py`** — `build_velocity_groove_plan` reshapes note *velocities* only: `crescendo`
+  (-1..1) ramps velocity over clip time, `dynamics` (-1..1) compresses/expands the range about the
+  mean, and `accent_pattern` (cyclic multipliers) × `grid_beats` applies a groove template.
+  Velocities clamp to 1..127; pitch/timing/duration/probability and note count are kept. Pure,
+  stdlib-only. The `plan_/apply_velocity_groove` pair writes back via the undoable
+  `apply_expression_to_clip` path with a fingerprint guard. Macro-dynamics — deliberately distinct
+  from `expression.py` (metric downbeat accents, swing, random humanize).
 
 ## Two separate ports — do not confuse them
 
