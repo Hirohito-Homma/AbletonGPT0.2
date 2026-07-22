@@ -89,6 +89,12 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   server tool samples the meter over a short window (needs the set playing; Remote Script backend
   only — the Extensions SDK exposes no meter). Peak-based and report-only; for a calibrated LUFS
   gap it points to the offline `compare_mix_to_target` path.
+- **`harmony.py`** — Camelot-wheel harmonic-mixing key compatibility. `parse_key` accepts
+  `"C major"`/`"Am"`/`"F#m"`/flats/Camelot codes; `build_key_compatibility` reports the
+  relationship (identical/relative/adjacent/two-step/diagonal/distant) + a 0-100 score;
+  `suggest_compatible_keys` lists the safe ring (same/relative/±1 fifth). Pure, stdlib-only.
+  Tools `analyze_key_compatibility`/`suggest_harmonic_keys` (two keys) and
+  `analyze_audio_key_compatibility` (two files via `estimate_key`). Report only (never transposes).
 
 ## Two separate ports — do not confuse them
 

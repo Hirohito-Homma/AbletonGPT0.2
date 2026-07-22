@@ -27,6 +27,7 @@ from .audio import (
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
+from .harmony import build_key_compatibility, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
@@ -142,6 +143,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline mix-vs-reference comparison (loudness + tone + per-band balance + stereo image) with a 0-100 match score and plain-language guidance (requires the audio extra: NumPy)",
             "built-in genre mix/master targets to compare a mix against without a reference track (loudness + band balance; requires the audio extra: NumPy)",
             "live master-meter peak/headroom check against a built-in target's true-peak ceiling (peak-based, not LUFS; Remote Script backend only)",
+            "harmonic-mixing key compatibility on the Camelot wheel (two keys or two audio files) with a 0-100 score and suggested compatible keys",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -419,6 +421,39 @@ def analyze_audio_tempo(
 def analyze_audio_key(file_path: str) -> dict[str, Any]:
     """WAV/AIFFを変更せず、キー(調)をオフライン推定する。NumPy(`abletongpt[audio]`)が必要。読み取り専用。"""
     return estimate_key(file_path)
+
+
+@mcp.tool()
+def analyze_key_compatibility(key_a: str, key_b: str) -> dict[str, Any]:
+    """2つのキーがハーモニック・ミックス的に合うかをCamelotホイールで判定する。キーは"C major"/"A minor"、
+    省略形("C"/"Am"/"F#m")、Camelotコード("8A"/"12B")のいずれも可。関係(同一/平行調/隣接=完全5度など)と
+    0-100の互換スコア・平易なガイダンスを返す。移調はしない・読み取り専用・NumPy不要。"""
+    try:
+        return build_key_compatibility(key_a, key_b)
+    except ValueError as error:
+        return {"read_only": True, "error": str(error)}
+
+
+@mcp.tool()
+def suggest_harmonic_keys(key: str) -> dict[str, Any]:
+    """指定キーとハーモニックに合うキー(同一・平行調・隣接する完全5度上下)をCamelotホイールで提案する。
+    キーは"C major"/省略形/Camelotコードを受け付ける。読み取り専用・NumPy不要。"""
+    try:
+        return suggest_compatible_keys(key)
+    except ValueError as error:
+        return {"read_only": True, "error": str(error)}
+
+
+@mcp.tool()
+def analyze_audio_key_compatibility(file_a: str, file_b: str) -> dict[str, Any]:
+    """2つのWAV/AIFFのキーをそれぞれ推定し、Camelotホイールでハーモニック互換性を判定する。
+    各推定キーと関係・0-100の互換スコア・ガイダンスを返す。ファイルは変更しない・読み取り専用・NumPy必須。"""
+    key_a = estimate_key(file_a)
+    key_b = estimate_key(file_b)
+    report = build_key_compatibility(key_a["key"], key_b["key"])
+    report["a"]["confidence"] = key_a.get("confidence")
+    report["b"]["confidence"] = key_b.get("confidence")
+    return report
 
 
 @mcp.tool()
