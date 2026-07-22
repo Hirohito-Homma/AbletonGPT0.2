@@ -9,6 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .contextual import analyze_midi_context, build_complementary_track_plan
+from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .vocal import build_vocal_plan
@@ -46,6 +47,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
+            "read-only expressive-performance planning for a MIDI clip (accent/swing/humanize/probability/CC automation)",
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
@@ -185,6 +187,48 @@ def create_complementary_midi_track(
         "instrument_selection": plan["instrument_selection"],
         "next_step": "生成結果を再生して確認し、必要ならseedを変えて別Sessionスロットへ生成してください。",
     }
+
+
+@mcp.tool()
+def plan_expression(
+    track_index: int,
+    clip_index: int,
+    accent: float = 0.0,
+    swing: float = 0.0,
+    humanize: float = 0.0,
+    weak_beat_probability: float = 1.0,
+    beats_per_bar: int = 4,
+    grid_beats: float = 0.5,
+    automation_shape: str = "",
+    automation_cc: int = 1,
+    automation_depth: int = 64,
+    automation_base: int = 0,
+    automation_cycles: int = 1,
+    automation_resolution_beats: float = 0.25,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップへ与える表情付け（アクセント/スイング/ヒューマナイズ/裏拍確率/CCオートメーション）を計画する。適用はapply_expressionで確認後に行う。"""
+    if automation_shape and automation_shape not in AUTOMATION_SHAPES:
+        raise ValueError(
+            "automation_shape must be empty or one of %s" % ", ".join(AUTOMATION_SHAPES)
+        )
+    clip_data = _read_midi_clip(track_index, clip_index)
+    return build_expression_plan(
+        clip_data,
+        accent=accent,
+        swing=swing,
+        humanize=humanize,
+        weak_beat_probability=weak_beat_probability,
+        beats_per_bar=beats_per_bar,
+        grid_beats=grid_beats,
+        automation_shape=automation_shape or None,
+        automation_cc=automation_cc,
+        automation_depth=automation_depth,
+        automation_base=automation_base,
+        automation_cycles=automation_cycles,
+        automation_resolution_beats=automation_resolution_beats,
+        seed=seed,
+    )
 
 
 @mcp.tool()
