@@ -78,6 +78,11 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   `match` score with per-dimension breakdown and the weakest dimension, plus plain-language mixing
   guidance. Pure, stdlib-only; the server tool builds the profiles from `loudness.py` + `audio.py`
   and never applies a change (report only).
+- **`targets.py`** — curated, built-in genre mix/master *targets* (`GENRE_TARGETS`, `list_targets`,
+  `get_target`), each a partial reference profile (LUFS/LRA/true-peak/crest + five-band balance;
+  tone and stereo left unset) so a mix can be compared against a target with no reference file.
+  Pure, stdlib-only; feeds the same `reference.py` comparator via the `compare_mix_to_target` tool
+  (report only). Numbers are directional approximations, not measured from a specific master.
 
 ## Two separate ports — do not confuse them
 

@@ -53,3 +53,45 @@ def test_compare_combines_loudness_tone_bands_and_stereo(monkeypatch):
     # A single summary score across all measured dimensions.
     assert 0.0 <= report["match"]["score"] <= 100.0
     assert report["match"]["weakest_dimension"] in report["match"]["dimensions"]
+
+
+def test_list_mix_targets_returns_the_builtin_targets():
+    result = server.list_mix_targets()
+
+    assert result["read_only"] is True
+    names = {row["name"] for row in result["targets"]}
+    assert {"streaming", "modern-pop", "edm", "classical"} <= names
+
+
+def test_compare_mix_to_target_uses_builtin_profile(monkeypatch):
+    monkeypatch.setattr(
+        server, "analyze_loudness_file", lambda path, *a, **k: {"measurements": _LOUDNESS[path]}
+    )
+    monkeypatch.setattr(
+        server, "extract_spectral_features", lambda path, *a, **k: {"features": _SPECTRAL[path]}
+    )
+    monkeypatch.setattr(server, "extract_spectral_bands", lambda path, *a, **k: dict(_BANDS[path]))
+    monkeypatch.setattr(server, "analyze_stereo_field", lambda path, *a, **k: dict(_STEREO[path]))
+
+    report = server.compare_mix_to_target("mix.wav", "edm")
+
+    assert report["read_only"] is True
+    assert report["reference"]["target"] == "edm"
+    # mix.wav is -16 LUFS vs the -7.5 EDM target -> 8.5 LU quieter.
+    assert report["deltas"]["loudness_lu"] == -8.5
+    assert any("quieter" in note for note in report["guidance"])
+    assert 0.0 <= report["match"]["score"] <= 100.0
+
+
+def test_compare_mix_to_target_unknown_returns_error_and_list(monkeypatch):
+    # An unknown target short-circuits before any audio analysis runs.
+    def _boom(*a, **k):
+        raise AssertionError("audio analysis should not run for an unknown target")
+
+    monkeypatch.setattr(server, "analyze_loudness_file", _boom)
+
+    result = server.compare_mix_to_target("mix.wav", "dubstep")
+
+    assert result["read_only"] is True
+    assert "dubstep" in result["error"]
+    assert {row["name"] for row in result["targets"]}
