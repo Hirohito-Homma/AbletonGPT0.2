@@ -32,6 +32,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
 from .reference import build_reference_comparison
+from .scale import build_scale_quantize_plan, parse_scale
 from .snapshots import build_snapshot, diff_snapshots
 from .targets import get_target, list_targets
 from .transpose import build_transpose_plan, shift_to_target_pc
@@ -146,6 +147,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "live master-meter peak/headroom check against a built-in target's true-peak ceiling (peak-based, not LUFS; Remote Script backend only)",
             "harmonic-mixing key compatibility on the Camelot wheel (two keys or two audio files) with a 0-100 score and suggested compatible keys",
             "transposing an existing MIDI clip by a fixed interval or to a target key/Camelot code (plan then apply; note count unchanged, Live-undoable)",
+            "scale-quantizing an existing MIDI clip: snapping out-of-scale notes to the nearest note in a key/scale (plan then apply; note count unchanged, Live-undoable)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -476,6 +478,95 @@ def apply_transpose_midi(
         "note_count": plan["note_count"],
         "folded_notes": plan["folded_notes"],
         "result_pitch_range": plan["result_pitch_range"],
+        "applied": applied,
+        "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
+    }
+
+
+def _resolve_scale(clip_data: dict[str, Any], key: str, scale: str) -> dict[str, Any]:
+    """Resolve the tonic pitch class + scale name from ``key``/``scale`` (or detect from the clip).
+
+    ``key`` supplies the tonic (and, when ``scale`` is empty/``auto``, the major/minor mode); if
+    ``key`` is empty the tonic and mode are detected from the clip's notes. An explicit ``scale``
+    always wins over the key's mode.
+    """
+    detected = False
+    if key:
+        tonic_pc, mode = parse_key(key)
+    else:
+        context = analyze_midi_context(clip_data)
+        detected_key = context["musical_context"]["key"]
+        if not detected_key:
+            raise ValueError(
+                "could not detect a key from the clip (e.g. drums); pass key explicitly"
+            )
+        tonic_pc = int(detected_key["tonic_pitch_class"])
+        mode = str(detected_key["mode"])
+        detected = True
+
+    scale_name = parse_scale(mode if scale.strip().lower() in ("", "auto") else scale)
+    return {
+        "tonic_pitch_class": tonic_pc,
+        "scale": scale_name,
+        "tonic": _NOTE_NAMES[tonic_pc % 12],
+        "key_detected": detected,
+    }
+
+
+@mcp.tool()
+def plan_scale_quantize_midi(
+    track_index: int,
+    clip_index: int,
+    key: str = "",
+    scale: str = "auto",
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIクリップのスケール量子化プランを作る。keyでトニックを指定("C"/"A minor"/
+    Camelot"8B"など。未指定ならクリップから自動検出)。scaleはmajor/minor/dorian/mixolydian/
+    major_pentatonic/blues等、"auto"はkeyのメジャー/マイナーに従う。スケール外の音だけ最寄りのスケール音へ
+    スナップ(同距離は下優先、0-127内)。ノート数不変。適用はapply_scale_quantize_midi。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_scale(clip_data, key, scale)
+    plan = build_scale_quantize_plan(clip_data, resolution["tonic_pitch_class"], resolution["scale"])
+    plan["resolution"] = resolution
+    plan["next_step"] = (
+        "内容を確認し、apply_scale_quantize_midiに同じ引数とexpected_source_fingerprint=%s を渡して適用してください。"
+        % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def apply_scale_quantize_midi(
+    track_index: int,
+    clip_index: int,
+    key: str = "",
+    scale: str = "auto",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_scale_quantize_midiで確認したスケール量子化を、既存MIDIクリップのノートへ適用する。スケール外の音を
+    最寄りのスケール音へスナップする。ノート数は不変でLiveのUndoで戻せる。expected_source_fingerprintを渡すと
+    確認後にクリップが変わっていた場合は拒否する。副作用はこのクリップのノート書き換えのみ。読み取り以外なし。"""
+    if track_index < 0 or clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    resolution = _resolve_scale(clip_data, key, scale)
+    plan = build_scale_quantize_plan(clip_data, resolution["tonic_pitch_class"], resolution["scale"])
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    length = plan["length_beats"]
+    _validate_midi_clip(track_index, clip_index, length, plan["notes"])
+    applied = bridge.call(
+        "apply_expression_to_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        length_beats=length,
+        notes=plan["notes"],
+    )
+    return {
+        "resolution": resolution,
+        "scale": plan["scale"],
+        "note_count": plan["note_count"],
+        "changed_notes": plan["changed_notes"],
         "applied": applied,
         "next_step": "クリップを再生して確認してください。元に戻すにはLiveのUndoを使えます。",
     }
