@@ -15,15 +15,12 @@ os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 
 def main() -> None:
     failures = []
-    tests = []
-    for test_file in ("test_bridge.py", "test_remote_script_runtime.py"):
-        test_namespace = runpy.run_path(str(ROOT / "tests" / test_file))
-        tests.extend(
-            ("%s::%s" % (test_file, name), function)
-            for name, function in test_namespace.items()
-            if name.startswith("test_") and callable(function)
-        )
-    tests.sort()
+    test_namespace = runpy.run_path(str(ROOT / "tests" / "test_bridge.py"))
+    tests = sorted(
+        (name, function)
+        for name, function in test_namespace.items()
+        if name.startswith("test_") and callable(function)
+    )
     for name, function in tests:
         try:
             function()

@@ -51,10 +51,7 @@ class ExtensionsBridge:
     def __init__(self, config: ExtensionsBridgeConfig | None = None) -> None:
         self.config = config or ExtensionsBridgeConfig.load()
 
-    def call(self, command: str, _timeout: float | None = None, **params: Any) -> Any:
-        timeout = self.config.timeout if _timeout is None else float(_timeout)
-        if timeout <= 0:
-            raise ValueError("extension request timeout must be positive")
+    def call(self, command: str, **params: Any) -> Any:
         request = {
             "protocol": "abletongpt.extensions.v1",
             "command": command,
@@ -65,9 +62,9 @@ class ExtensionsBridge:
 
         try:
             with socket.create_connection(
-                (self.config.host, self.config.port), timeout
+                (self.config.host, self.config.port), self.config.timeout
             ) as connection:
-                connection.settimeout(timeout)
+                connection.settimeout(self.config.timeout)
                 connection.sendall(payload)
                 response = self._read_line(connection)
         except (OSError, TimeoutError) as exc:

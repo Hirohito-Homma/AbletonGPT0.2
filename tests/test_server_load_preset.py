@@ -55,26 +55,14 @@ def test_load_forwards_target_and_defaults(fake_bridge):
     assert result["verified_single_add"] is True
     command, params = fake_bridge.calls[0]
     assert command == "load_preset"
-    assert params == {
-        "_timeout": 30.0,
-        "track_index": 1,
-        "category": "instruments",
-        "path": [],
-        "name": "Grand Piano",
-    }
+    assert params == {"track_index": 1, "category": "instruments", "path": [], "name": "Grand Piano"}
 
 
 def test_load_forwards_path_and_strips_name(fake_bridge):
     server.load_browser_preset(2, "drums", "  808 Kit  ", path=["Kits"])
 
     _command, params = fake_bridge.calls[0]
-    assert params == {
-        "_timeout": 30.0,
-        "track_index": 2,
-        "category": "drums",
-        "path": ["Kits"],
-        "name": "808 Kit",
-    }
+    assert params == {"track_index": 2, "category": "drums", "path": ["Kits"], "name": "808 Kit"}
 
 
 def test_load_rejects_negative_track_index(fake_bridge):
