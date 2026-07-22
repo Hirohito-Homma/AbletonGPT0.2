@@ -17,6 +17,8 @@ and the clip's automation.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import random
 import statistics
@@ -132,6 +134,7 @@ def build_expression_plan(
             "length_beats": length,
             "track": clip_data.get("track"),
             "note_count": len(source),
+            "fingerprint": _fingerprint(source, length),
         },
         "settings": {
             "accent": accent,
@@ -348,3 +351,22 @@ def _normalized_notes(raw_notes: list[dict[str, Any]], length: float) -> list[di
             }
         )
     return sorted(normalized, key=lambda item: (item["start_time"], item["pitch"]))
+
+
+def _fingerprint(notes: list[dict[str, Any]], length: float) -> str:
+    """Stable short hash of the source notes, so ``apply`` can detect edits since plan.
+
+    Uses the same scheme as :mod:`abletongpt.contextual` for a consistent identity.
+    """
+    compact = [
+        [
+            item["pitch"],
+            round(item["start_time"], 5),
+            round(item["duration"], 5),
+            item["velocity"],
+            round(item["probability"], 5),
+        ]
+        for item in notes
+    ]
+    payload = json.dumps({"length": round(length, 5), "notes": compact}, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

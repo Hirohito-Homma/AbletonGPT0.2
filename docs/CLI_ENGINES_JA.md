@@ -256,7 +256,7 @@ min probability after: 1
 | `--seed` | | 決定論シード（既定 0） |
 | `--json` | | 完全計画（notes / automation / diff / apply_contract など）をJSONで出力 |
 
-**読み取り専用**でクリップを書き換えません。ノート数は不変で、`apply_contract` は「確認必須・ノート追加削除なし・既存クリップのノートを差し替え」を示し、automation 指定時は `writes_automation_envelopes: true` も立ちます。オートメーション曲線は Live の線形補間で忠実に再現できる形状のみを提供します。実際の適用は承認後の別ツールで行います（後続実装）。ファイル無し・ノート無し・範囲外の設定値は exit 2。
+**読み取り専用**でクリップを書き換えません。ノート数は不変で、`apply_contract` は「確認必須・ノート追加削除なし・既存クリップのノートを差し替え」を示し、automation 指定時は `writes_automation_envelopes: true` も立ちます。オートメーション曲線は Live の線形補間で忠実に再現できる形状のみを提供します。Live クリップへの実適用は MCP ツール `plan_expression`（確認）→ `apply_expression`（ノート差し替え、Undo 可）で行います（CLI は計画のみ）。CC オートメーションの書き戻しは現時点では未対応です。ファイル無し・ノート無し・範囲外の設定値は exit 2。
 
 ---
 
