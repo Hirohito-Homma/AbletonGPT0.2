@@ -114,9 +114,16 @@ Error response:
 
 ## SDK-side implementation
 
+A dependency-free Node.js companion implementing this protocol lives under
+`extensions/AbletonGPT/` (`node index.js`, `npm test`). It ships a
+`MockLiveProvider` so the whole wire contract runs and can be verified from the
+Python `ExtensionsBridge` without the SDK or a running Live; the real
+`SdkLiveProvider` is a stub to fill in against the Extensions SDK. See
+[`extensions/AbletonGPT/README.md`](../extensions/AbletonGPT/README.md).
+
 The official Ableton Extensions SDK is distributed separately during the
-public beta. Place the SDK-created Extension project under
-`extensions/AbletonGPT/`, then implement an adapter that:
+public beta. Implement `SdkLiveProvider` (or replace it with the SDK-created
+project) so that the adapter:
 
 1. Binds only to localhost.
 2. Verifies the shared token before executing a command.
