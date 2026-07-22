@@ -14,6 +14,7 @@ export const PROTOCOL = "abletongpt.extensions.v1";
 const COMMANDS = {
   ping: async () => ({ pong: true, protocol: PROTOCOL }),
   get_tempo: async (provider) => provider.getTempo(),
+  get_state: async (provider) => provider.getState(),
   get_tracks: async (provider) => provider.getTracks(),
   get_midi_clip_notes: async (provider, params) => provider.getMidiClipNotes(params),
   get_selected_context: async (provider) => provider.getSelectedContext(),

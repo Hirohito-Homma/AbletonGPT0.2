@@ -31,6 +31,17 @@ test("get_tracks returns the track list", async () => {
   assert.equal(response.result.tracks.length, 2);
 });
 
+test("get_state returns tempo, scene count and tracks", async () => {
+  const response = await dispatcher().handle({ command: "get_state" });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.tempo, 120);
+  assert.equal(typeof response.result.scene_count, "number");
+  assert.equal(response.result.tracks.length, 2);
+  assert.equal(response.result.tracks[0].clip_slots, 8);
+  // Parity note: no is_playing / signature (unavailable via the SDK).
+  assert.equal("is_playing" in response.result, false);
+});
+
 test("get_midi_clip_notes returns a readable clip payload", async () => {
   const response = await dispatcher().handle({
     command: "get_midi_clip_notes",
@@ -118,6 +129,7 @@ test("the command allowlist is exactly the v1 set", () => {
       "create_midi_clip",
       "get_midi_clip_notes",
       "get_selected_context",
+      "get_state",
       "get_tempo",
       "get_tracks",
       "ping",
