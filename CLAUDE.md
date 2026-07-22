@@ -152,6 +152,12 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   name keyword). Read-only plan. The `plan_section_layers` tool builds it from `get_state`;
   `apply_section_layer` sets each track's mute to match one chosen section via `set_track_mute`
   (mute toggles only — trivially reversible, no track/clip changes). Pure, stdlib-only.
+- **`timescale.py`** — `build_timescale_plan` scales every note's start/duration and the clip
+  length by a factor: 2.0 = half-time (slower/longer), 0.5 = double-time (faster/shorter);
+  `factor_for` maps the `"half"`/`"double"` modes. Pitch/velocity/probability and the note count
+  are kept. The length changes, so this is a plan/**create** (not in-place): the
+  `plan_/create_timescale_clip` pair writes into an empty slot via the non-overwriting
+  `create_midi_clip` with a source-fingerprint guard. Pure, stdlib-only.
 
 ## Two separate ports — do not confuse them
 
