@@ -13,6 +13,7 @@ from .presets import (
     default_name_for_style,
     dub_techno_arrangement,
     minimal_techno_arrangement,
+    pop_song_arrangement,
     simple_arrangement,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "default_name_for_style",
     "dub_techno_arrangement",
     "minimal_techno_arrangement",
+    "pop_song_arrangement",
     "simple_arrangement",
 ]
