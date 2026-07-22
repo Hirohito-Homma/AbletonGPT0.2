@@ -154,3 +154,74 @@ At the time this integration was introduced, Ableton Extensions required Live
 12 Suite Beta 12.4.5 or later, the separately downloaded Extensions SDK, and
 Node.js 24.16.0 LTS or later. Check Ableton's current beta documentation before
 installing because the SDK and manifest format may change during beta.
+
+## Verifying on a real Live install
+
+The companion's protocol, providers, and the Python bridge are all covered by
+automated tests and type-checking; the one thing that can only be confirmed on a
+real beta install is that the Extension Host lets the extension open its loopback
+TCP server (`node:net`). This runbook walks that through. The `get_midi_clip_notes`
+command is needed for the full read→plan→apply flow, so build from a checkout that
+includes it.
+
+### 1. Build the extension and launch it in Live
+
+```bash
+cd extensions/AbletonGPT
+mkdir -p vendor
+cp /path/to/ableton-extensions-sdk-1.0.0-beta.0.tgz vendor/
+cp /path/to/ableton-extensions-cli-1.0.0-beta.0.tgz vendor/
+npm install
+npm run typecheck        # expected: 0 errors
+```
+
+Enable **Developer Mode** in Live (Preferences → Extensions), then export the
+config in the shell so Live's Extension Host inherits it, and start:
+
+```bash
+export EXTENSION_HOST_PATH="/Applications/Ableton Live 12.4 Beta.app"
+export ABLETONGPT_EXTENSIONS_PORT=9878
+# Leave the token empty for the first connectivity check to remove one variable.
+npm start
+```
+
+### 2. Critical check — does `node:net` work?
+
+Success looks like this line in the startup log:
+
+```text
+AbletonGPT Extension listening on 127.0.0.1:9878 (token: none)
+```
+
+If it appears, the architecture holds. If it does not — capture the error; only
+the transport (`src/server.js`) would then need swapping, not the protocol or
+provider.
+
+### 3. Drive real Live from Python
+
+In Live, put a MIDI clip with some notes into a known slot (e.g. the first MIDI
+track's top Session slot). Then, in a separate shell:
+
+```bash
+export ABLETONGPT_BACKEND=extensions ABLETONGPT_EXTENSIONS_PORT=9878
+```
+
+```python
+# probe.py  — indices are 0-based; song.tracks excludes return/main tracks.
+from abletongpt import server
+print("backend:", type(server.bridge).__name__)
+print("tracks:", server.bridge.call("get_tracks")["tracks"])
+print("clip:", server.bridge.call("get_midi_clip_notes", track_index=0, clip_index=0))
+res = server.apply_expression(0, 0, accent=0.8, swing=0.4)   # undoable in Live
+print("applied:", res["applied"], "| velocity", res["diff"]["velocity"])
+```
+
+```bash
+uv run python probe.py
+```
+
+Confirm: real track names come back; the clip's notes come back; after
+`apply_expression` the clip's velocities change in Live and ⌘Z reverts it.
+
+Once connectivity is confirmed, set the same `ABLETONGPT_EXTENSIONS_TOKEN` on both
+sides (the Live-side shell and the Python side) for real use.
