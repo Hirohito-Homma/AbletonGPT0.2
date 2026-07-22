@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
+from .snapshots import build_snapshot, diff_snapshots
 from .vocal import build_vocal_plan
 
 
@@ -90,6 +92,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "non-overwriting Session clip duplication",
             "collision-safe Session-to-Arrangement clip and scene copy",
             "read-only Session and Arrangement audio source-path inspection",
+            "non-destructive normalized mix-state snapshots and snapshot diffing",
             "device and effect parameter control",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
@@ -334,6 +337,24 @@ def apply_expression(
 def get_mix_snapshot() -> dict[str, Any]:
     """全トラックとMasterの音量、パン、Mute、Solo、Send、瞬間メーターレベルを取得する。LUFS解析ではない。"""
     return bridge.call("get_mix_snapshot")
+
+
+@mcp.tool()
+def capture_state_snapshot(label: str | None = None) -> dict[str, Any]:
+    """現在のテンポ／拍子／全トラック・Return・Masterのミックス状態を、瞬間メーターを除いた
+    安定した正規化スナップショットとして読み取り専用で取得する。編集の前後で撮って
+    diff_state_snapshotsで差分比較できる。Liveは一切変更しない。"""
+    state = bridge.call("get_state")
+    mix = bridge.call("get_mix_snapshot")
+    captured_at = datetime.now(timezone.utc).isoformat()
+    return build_snapshot(state, mix, label=label, captured_at=captured_at)
+
+
+@mcp.tool()
+def diff_state_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """capture_state_snapshotで撮った2つのスナップショットを比較し、テンポ／拍子と各トラック・
+    Return・Masterのボリューム／パン／Mute／Solo／Arm／Sendの変化を構造化して返す。純ロジック・読み取り専用。"""
+    return diff_snapshots(before, after)
 
 
 @mcp.tool()
