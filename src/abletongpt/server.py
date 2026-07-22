@@ -6,6 +6,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
@@ -26,6 +27,7 @@ _BACKEND_ALIASES = {
     "remote_script": "remote_script",
     "extension": "extensions",
     "extensions": "extensions",
+    "auto": "auto",
 }
 
 
@@ -34,20 +36,25 @@ def resolve_backend_name() -> str:
     raw = str(setting("backend", "remote_script")).strip().lower()
     if raw not in _BACKEND_ALIASES:
         raise ValueError(
-            "unknown backend %r; use 'remote_script' or 'extensions'" % raw
+            "unknown backend %r; use 'remote_script', 'extensions' or 'auto'" % raw
         )
     return _BACKEND_ALIASES[raw]
 
 
-def select_backend() -> AbletonBridge | ExtensionsBridge:
-    """Build the configured Live backend. Both share the same ``call`` contract.
+def select_backend() -> AbletonBridge | ExtensionsBridge | FallbackBridge:
+    """Build the configured Live backend. All share the same ``call`` contract.
 
     ``remote_script`` (default) talks to the Control Surface Remote Script; ``extensions``
-    talks to the Ableton Extensions SDK companion (Live 12 Suite Beta 12.4.5+). The
-    connection is lazy, so selecting a backend never opens a socket on its own.
+    talks to the Ableton Extensions SDK companion (Live 12 Suite Beta 12.4.5+); ``auto``
+    prefers the Extensions companion and falls back to the Remote Script if it is
+    unreachable. The connection is lazy, so selecting a backend never opens a socket on
+    its own.
     """
-    if resolve_backend_name() == "extensions":
+    name = resolve_backend_name()
+    if name == "extensions":
         return ExtensionsBridge()
+    if name == "auto":
+        return FallbackBridge(ExtensionsBridge(), AbletonBridge())
     return AbletonBridge()
 
 
@@ -70,7 +77,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
         "version": "0.2.0",
         "live_support": "Ableton Live 11+; native device insertion requires Live 12.3+",
         "backend": resolve_backend_name(),
-        "available_backends": ["remote_script", "extensions"],
+        "available_backends": ["remote_script", "extensions", "auto"],
         "features": [
             "transport and track control",
             "beginner song sketches",
