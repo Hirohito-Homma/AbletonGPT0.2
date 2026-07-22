@@ -33,6 +33,119 @@ export class MockLiveProvider extends LiveProvider {
     this.createdClips = [];
     // Records expression note-replacements applied to clips.
     this.appliedExpressions = [];
+    // Canned devices per track index, with mutable parameter values.
+    this.deviceState = {
+      0: [
+        {
+          name: "Reverb",
+          parameters: [
+            { name: "Device On", value: 1, min: 0, max: 1, is_quantized: true, value_items: ["Off", "On"] },
+            { name: "Dry/Wet", value: 0.3, min: 0, max: 1, is_quantized: false, default_value: 0.5 },
+          ],
+        },
+      ],
+    };
+  }
+
+  static _paramState(index, parameter) {
+    const { min, max, value } = parameter;
+    const state = {
+      index,
+      name: parameter.name,
+      value,
+      normalized_value: max === min ? 0 : (value - min) / (max - min),
+      min,
+      max,
+      is_quantized: parameter.is_quantized,
+    };
+    if (parameter.is_quantized) {
+      state.value_items = parameter.value_items.slice();
+    } else {
+      state.default_value = parameter.default_value;
+    }
+    return state;
+  }
+
+  _requireDevice(trackIndex, deviceIndex) {
+    const track = this._track(trackIndex);
+    const di = Number(deviceIndex);
+    if (!Number.isInteger(di) || di < 0) {
+      throw new Error("device_index must be a non-negative integer");
+    }
+    const device = (this.deviceState[track.index] || [])[di];
+    if (!device) {
+      throw new Error("device_index is out of range");
+    }
+    return device;
+  }
+
+  _requireParameter(trackIndex, deviceIndex, parameterIndex) {
+    const device = this._requireDevice(trackIndex, deviceIndex);
+    const pi = Number(parameterIndex);
+    if (!Number.isInteger(pi) || pi < 0) {
+      throw new Error("parameter_index must be a non-negative integer");
+    }
+    const parameter = device.parameters[pi];
+    if (!parameter) {
+      throw new Error("parameter_index is out of range");
+    }
+    return { device, parameter, index: pi };
+  }
+
+  async getTrackDevices(params) {
+    const track = this._track(params.track_index);
+    const devices = (this.deviceState[track.index] || []).map((device, index) => ({
+      index,
+      name: device.name,
+      parameters: device.parameters.map((parameter, parameterIndex) =>
+        MockLiveProvider._paramState(parameterIndex, parameter),
+      ),
+    }));
+    return { track_index: Number(params.track_index), track: track.name, devices };
+  }
+
+  async setDeviceParameter(params) {
+    const { device, parameter, index } = this._requireParameter(
+      params.track_index,
+      params.device_index,
+      params.parameter_index,
+    );
+    let value = Number(params.value);
+    if (params.normalized) {
+      value = parameter.min + value * (parameter.max - parameter.min);
+    }
+    if (value < parameter.min || value > parameter.max) {
+      throw new Error("parameter value out of range");
+    }
+    parameter.value = value;
+    return { device: device.name, parameter: MockLiveProvider._paramState(index, parameter) };
+  }
+
+  async resetDeviceParameter(params) {
+    const { device, parameter, index } = this._requireParameter(
+      params.track_index,
+      params.device_index,
+      params.parameter_index,
+    );
+    if (parameter.is_quantized) {
+      throw new Error("quantized parameters do not expose a reliable default value");
+    }
+    parameter.value = parameter.default_value;
+    return { device: device.name, parameter: MockLiveProvider._paramState(index, parameter) };
+  }
+
+  async setDevicePower(params) {
+    const device = this._requireDevice(params.track_index, params.device_index);
+    const parameter = device.parameters[0];
+    if (!parameter) {
+      throw new Error("device has no power parameter");
+    }
+    parameter.value = params.enabled ? 1 : 0;
+    return {
+      device: device.name,
+      enabled: parameter.value >= 0.5,
+      parameter: MockLiveProvider._paramState(0, parameter),
+    };
   }
 
   async getTempo() {

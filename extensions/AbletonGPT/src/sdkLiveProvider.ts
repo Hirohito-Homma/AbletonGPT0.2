@@ -3,7 +3,27 @@
 // Implements the same interface as MockLiveProvider (src/liveProvider.js) so the protocol
 // layer is backend-agnostic. Every method uses only the confirmed v1.0.0 SDK surface.
 
-import { type ExtensionContext, MidiClip, MidiTrack, type NoteDescription, Track } from "@ableton-extensions/sdk";
+import {
+  type Device,
+  type DeviceParameter,
+  type ExtensionContext,
+  MidiClip,
+  MidiTrack,
+  type NoteDescription,
+  Track,
+} from "@ableton-extensions/sdk";
+
+type ParameterState = {
+  index: number;
+  name: string;
+  value: number;
+  normalized_value: number;
+  min: number;
+  max: number;
+  is_quantized: boolean;
+  value_items?: string[];
+  default_value?: number;
+};
 
 // A note as it arrives over the wire from the Python side (snake_case).
 export type IncomingNote = {
@@ -51,6 +71,60 @@ export class SdkLiveProvider {
       throw new Error("track_index is out of range");
     }
     return track;
+  }
+
+  private requireDevice(trackIndex: number, deviceIndex: number): Device<"1.0.0"> {
+    const track = this.requireTrack(trackIndex);
+    const index = Number(deviceIndex);
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error("device_index must be a non-negative integer");
+    }
+    const device = track.devices[index];
+    if (!device) {
+      throw new Error("device_index is out of range");
+    }
+    return device;
+  }
+
+  private requireParameter(
+    trackIndex: number,
+    deviceIndex: number,
+    parameterIndex: number,
+  ): { device: Device<"1.0.0">; parameter: DeviceParameter<"1.0.0">; index: number } {
+    const device = this.requireDevice(trackIndex, deviceIndex);
+    const index = Number(parameterIndex);
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error("parameter_index must be a non-negative integer");
+    }
+    const parameter = device.parameters[index];
+    if (!parameter) {
+      throw new Error("parameter_index is out of range");
+    }
+    return { device, parameter, index };
+  }
+
+  private async parameterState(
+    index: number,
+    parameter: DeviceParameter<"1.0.0">,
+  ): Promise<ParameterState> {
+    const min = parameter.min;
+    const max = parameter.max;
+    const value = await parameter.getValue();
+    const state: ParameterState = {
+      index,
+      name: parameter.name,
+      value,
+      normalized_value: max === min ? 0 : (value - min) / (max - min),
+      min,
+      max,
+      is_quantized: parameter.isQuantized,
+    };
+    if (parameter.isQuantized) {
+      state.value_items = parameter.valueItems.map((item) => item.name);
+    } else {
+      state.default_value = parameter.defaultValue;
+    }
+    return state;
   }
 
   async getTempo(): Promise<{ tempo: number }> {
@@ -203,6 +277,87 @@ export class SdkLiveProvider {
     const track = this.requireTrack(params.track_index);
     track.arm = Boolean(params.armed);
     return { track: track.name, arm: track.arm };
+  }
+
+  async getTrackDevices(params: { track_index: number }): Promise<{
+    track_index: number;
+    track: string;
+    devices: Array<{ index: number; name: string; parameters: ParameterState[] }>;
+  }> {
+    const track = this.requireTrack(params.track_index);
+    // The SDK Device exposes only name + parameters (no class_name / type / is_active).
+    const devices = await Promise.all(
+      track.devices.map(async (device, index) => ({
+        index,
+        name: device.name,
+        parameters: await Promise.all(
+          device.parameters.map((parameter, parameterIndex) =>
+            this.parameterState(parameterIndex, parameter),
+          ),
+        ),
+      })),
+    );
+    return { track_index: Number(params.track_index), track: track.name, devices };
+  }
+
+  async setDeviceParameter(params: {
+    track_index: number;
+    device_index: number;
+    parameter_index: number;
+    value: number;
+    normalized?: boolean;
+  }): Promise<{ device: string; parameter: ParameterState }> {
+    const { device, parameter, index } = this.requireParameter(
+      params.track_index,
+      params.device_index,
+      params.parameter_index,
+    );
+    let value = Number(params.value);
+    if (params.normalized) {
+      value = parameter.min + value * (parameter.max - parameter.min);
+    }
+    if (value < parameter.min || value > parameter.max) {
+      throw new Error("parameter value out of range");
+    }
+    await parameter.setValue(value);
+    return { device: device.name, parameter: await this.parameterState(index, parameter) };
+  }
+
+  async resetDeviceParameter(params: {
+    track_index: number;
+    device_index: number;
+    parameter_index: number;
+  }): Promise<{ device: string; parameter: ParameterState }> {
+    const { device, parameter, index } = this.requireParameter(
+      params.track_index,
+      params.device_index,
+      params.parameter_index,
+    );
+    if (parameter.isQuantized) {
+      throw new Error("quantized parameters do not expose a reliable default value");
+    }
+    await parameter.setValue(parameter.defaultValue);
+    return { device: device.name, parameter: await this.parameterState(index, parameter) };
+  }
+
+  async setDevicePower(params: {
+    track_index: number;
+    device_index: number;
+    enabled: boolean;
+  }): Promise<{ device: string; enabled: boolean; parameter: ParameterState }> {
+    const device = this.requireDevice(params.track_index, params.device_index);
+    // Live's "Device On" is the device's first parameter (mirrors the Remote Script).
+    const parameter = device.parameters[0];
+    if (!parameter) {
+      throw new Error("device has no power parameter");
+    }
+    await parameter.setValue(params.enabled ? 1 : 0);
+    const value = await parameter.getValue();
+    return {
+      device: device.name,
+      enabled: value >= 0.5,
+      parameter: await this.parameterState(0, parameter),
+    };
   }
 
   async getSelectedContext(): Promise<never> {
