@@ -19,6 +19,7 @@ const COMMANDS = {
   get_midi_clip_notes: async (provider, params) => provider.getMidiClipNotes(params),
   get_selected_context: async (provider) => provider.getSelectedContext(),
   get_mix_snapshot: async (provider) => provider.getMixSnapshot(),
+  get_clip_warp_markers: async (provider, params) => provider.getClipWarpMarkers(params),
   create_midi_clip: async (provider, params) => provider.createMidiClip(params),
   apply_expression_to_clip: async (provider, params) => provider.applyExpressionToClip(params),
   set_tempo: async (provider, params) => provider.setTempo(params),

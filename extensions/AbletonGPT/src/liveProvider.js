@@ -22,6 +22,9 @@ export class LiveProvider {
   async addNativeDevice(_params) {
     throw new Error("not implemented");
   }
+  async getClipWarpMarkers(_params) {
+    throw new Error("not implemented");
+  }
   async createMidiClip(_params) {
     throw new Error("not implemented");
   }
@@ -290,6 +293,34 @@ export class MockLiveProvider extends LiveProvider {
       devices.splice(index, 0, device);
     }
     return { track: track.name, index, name, device_count: devices.length };
+  }
+
+  async getClipWarpMarkers(params) {
+    const track = this._track(params.track_index);
+    const clipIndex = Number(params.clip_index);
+    if (!Number.isInteger(clipIndex) || clipIndex < 0) {
+      throw new Error("clip_index must be a non-negative integer");
+    }
+    // The mock models clip type via the track: MIDI tracks have no audio clip.
+    if (track.has_midi_input) {
+      throw new Error("target clip is not an audio clip");
+    }
+    const markers = [
+      { beat_time: 0.0, sample_time: 0.0 },
+      { beat_time: 4.0, sample_time: 1.0 },
+    ];
+    return {
+      track: track.name,
+      track_index: Number(params.track_index),
+      clip_index: clipIndex,
+      clip: "Mock Loop",
+      is_audio_clip: true,
+      warping: true,
+      warp_mode: 0,
+      marker_count: markers.length,
+      markers,
+      read_only: true,
+    };
   }
 
   _track(index) {
