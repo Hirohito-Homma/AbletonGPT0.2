@@ -139,6 +139,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   stdlib-only. The `plan_/apply_velocity_groove` pair writes back via the undoable
   `apply_expression_to_clip` path with a fingerprint guard. Macro-dynamics — deliberately distinct
   from `expression.py` (metric downbeat accents, swing, random humanize).
+- **`phrase.py`** — `build_phrase_from_loop` tiles an existing loop's notes `repeats` times into
+  one longer clip (a Session loop → arrangement-length phrase), with an optional velocity
+  `build_up` ramp across the phrase and a `final_fill` density subdivision on the last bar. Note
+  count grows, so this is a plan/**create** (not an in-place edit): the `plan_/create_phrase_from_loop`
+  pair writes the result into an **empty** slot via the non-overwriting `create_midi_clip` (refuses
+  occupied slots) with a source-fingerprint guard. Works on the user's own material — distinct from
+  `create_part_variation` (regenerates a part from scratch with a new seed). Pure, stdlib-only.
 
 ## Two separate ports — do not confuse them
 

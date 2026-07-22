@@ -32,6 +32,7 @@ from .harmony import build_key_compatibility, parse_key, suggest_compatible_keys
 from .instruments import build_instrument_plan, build_role_selection
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .phrase import build_phrase_from_loop
 from .progression import build_progression_analysis
 from .quantize import build_quantize_plan
 from .reference import build_reference_comparison
@@ -156,6 +157,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "quantizing an existing MIDI clip's note timing to a grid with strength and optional swing (plan then apply; only start times move, note count unchanged, Live-undoable)",
             "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
+            "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -1529,6 +1531,77 @@ def create_part_variation(
         length_beats=part["length_beats"],
         notes=part["notes"],
     )
+
+
+@mcp.tool()
+def plan_phrase_from_loop(
+    track_index: int,
+    clip_index: int,
+    repeats: int,
+    build_up: float = 0.0,
+    final_fill: bool = False,
+) -> dict[str, Any]:
+    """Liveを変更せず、既存MIDIループを繰り返して長いフレーズを組むプランを作る。repeats回タイル展開し、
+    build_up(0..1)でフレーズ全体に弱→強のベロシティ・ビルドアップ、final_fill=Trueで最終小節に密度フィル
+    (各ノートの細分コピー)を追加する。ユーザーの既存ノートを使う(create_part_variationのゼロ生成とは別物)。
+    音数が増えるので新しい空スロットへ書き出す(create_phrase_from_loop)。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_phrase_from_loop(
+        clip_data, repeats, build_up=build_up, final_fill=final_fill
+    )
+    plan["next_step"] = (
+        "空きスロットを選び、create_phrase_from_loopに同じ引数とdestination_clip_index、"
+        "expected_source_fingerprint=%s を渡して書き出してください。" % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def create_phrase_from_loop(
+    track_index: int,
+    clip_index: int,
+    repeats: int,
+    destination_clip_index: int,
+    build_up: float = 0.0,
+    final_fill: bool = False,
+    destination_track_index: int = -1,
+    name: str = "",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_phrase_from_loopで確認したフレーズを、空きSessionスロットへ新規クリップとして書き出す。既存ループを
+    repeats回タイル展開し(任意でbuild_up/final_fill)、destination_clip_index(と省略時は同一track)の空スロットへ
+    create_midi_clipで作成する(占有スロットは拒否=非破壊)。expected_source_fingerprintを渡すと確認後に元クリップが
+    変わっていた場合は拒否する。読み取り以外の副作用は新規クリップ作成のみ。"""
+    if track_index < 0 or clip_index < 0 or destination_clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_phrase_from_loop(
+        clip_data, repeats, build_up=build_up, final_fill=final_fill
+    )
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    destination_track = track_index if destination_track_index < 0 else destination_track_index
+    clip_name = name or "%s x%d" % (clip_data.get("clip", "Loop"), plan["repeats"])
+    created = bridge.call(
+        "create_midi_clip",
+        track_index=destination_track,
+        clip_index=destination_clip_index,
+        name=clip_name,
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    return {
+        "repeats": plan["repeats"],
+        "build_up": plan["build_up"],
+        "final_fill": plan["final_fill"],
+        "length_beats": plan["length_beats"],
+        "note_count": plan["note_count"],
+        "added_fill_notes": plan["added_fill_notes"],
+        "destination_track_index": destination_track,
+        "destination_clip_index": destination_clip_index,
+        "created": created,
+        "next_step": "生成したフレーズを再生して確認してください。元ループは変更していません。",
+    }
 
 
 @mcp.tool()
