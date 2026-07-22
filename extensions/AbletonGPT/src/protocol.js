@@ -28,6 +28,7 @@ const COMMANDS = {
   set_track_solo: async (provider, params) => provider.setTrackSolo(params),
   set_track_arm: async (provider, params) => provider.setTrackArm(params),
   get_track_devices: async (provider, params) => provider.getTrackDevices(params),
+  add_native_device: async (provider, params) => provider.addNativeDevice(params),
   set_device_parameter: async (provider, params) => provider.setDeviceParameter(params),
   reset_device_parameter: async (provider, params) => provider.resetDeviceParameter(params),
   set_device_power: async (provider, params) => provider.setDevicePower(params),

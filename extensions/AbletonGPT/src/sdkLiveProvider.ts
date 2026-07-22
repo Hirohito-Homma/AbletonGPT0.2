@@ -411,6 +411,35 @@ export class SdkLiveProvider {
     };
   }
 
+  async addNativeDevice(params: {
+    track_index: number;
+    device_name: string;
+    index?: number;
+  }): Promise<{ track: string; index: number; name: string; device_count: number }> {
+    const track = this.requireTrack(params.track_index);
+    const name = String(params.device_name ?? "").trim();
+    if (!name || name.length > 200) {
+      throw new Error("device_name must contain 1 to 200 characters");
+    }
+    let index = params.index === undefined ? -1 : Number(params.index);
+    if (!Number.isInteger(index) || index < -1) {
+      throw new Error("index must be -1 or a non-negative integer");
+    }
+    const before = track.devices.length;
+    if (index > before) {
+      throw new Error("device insertion index out of range");
+    }
+    // insertDevice loads a built-in Live device by name (third-party plug-ins are rejected
+    // by the SDK) and returns the inserted Device; -1 appends at the end of the chain.
+    const insertAt = index === -1 ? before : index;
+    const device = await track.insertDevice(name, insertAt);
+    const after = track.devices.length;
+    if (after !== before + 1) {
+      throw new Error("Live did not insert the requested device");
+    }
+    return { track: track.name, index: insertAt, name: device.name, device_count: after };
+  }
+
   async getSelectedContext(): Promise<never> {
     // The SDK exposes selection only through context-menu command arguments
     // (ArrangementSelection / ClipSlotSelection), not as an ambient query.

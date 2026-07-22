@@ -67,6 +67,53 @@ test("get_mix_snapshot reflects a volume mutation", async () => {
   assert.equal(response.result.tracks[0].volume, 0.42);
 });
 
+test("add_native_device appends a device and echoes the new count", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const response = await disp.handle({
+    command: "add_native_device",
+    params: { track_index: 1, device_name: "Reverb" },
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.name, "Reverb");
+  assert.equal(response.result.index, 0); // first device on track 1
+  assert.equal(response.result.device_count, 1);
+  // The mutation is visible through get_track_devices.
+  const devices = await disp.handle({ command: "get_track_devices", params: { track_index: 1 } });
+  assert.equal(devices.result.devices[0].name, "Reverb");
+});
+
+test("add_native_device inserts at an explicit index", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  // Track 0 starts with one device (Reverb) in the mock.
+  const response = await disp.handle({
+    command: "add_native_device",
+    params: { track_index: 0, device_name: "Auto Filter", index: 0 },
+  });
+  assert.equal(response.result.index, 0);
+  assert.equal(response.result.device_count, 2);
+  const devices = await disp.handle({ command: "get_track_devices", params: { track_index: 0 } });
+  assert.deepEqual(
+    devices.result.devices.map((device) => device.name),
+    ["Auto Filter", "Reverb"],
+  );
+});
+
+test("add_native_device rejects a bad name or out-of-range index", async () => {
+  const disp = new Dispatcher(new MockLiveProvider(), {});
+  const emptyName = await disp.handle({
+    command: "add_native_device",
+    params: { track_index: 0, device_name: "  " },
+  });
+  assert.equal(emptyName.ok, false);
+  const badIndex = await disp.handle({
+    command: "add_native_device",
+    params: { track_index: 1, device_name: "Reverb", index: 5 },
+  });
+  assert.equal(badIndex.ok, false);
+});
+
 test("get_midi_clip_notes returns a readable clip payload", async () => {
   const response = await dispatcher().handle({
     command: "get_midi_clip_notes",
@@ -261,6 +308,7 @@ test("the command allowlist is exactly the v1 set", () => {
   assert.deepEqual(
     [...ALLOWED_COMMANDS].sort(),
     [
+      "add_native_device",
       "apply_expression_to_clip",
       "create_midi_clip",
       "get_midi_clip_notes",

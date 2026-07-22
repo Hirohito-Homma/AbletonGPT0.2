@@ -19,6 +19,9 @@ export class LiveProvider {
   async getMixSnapshot() {
     throw new Error("not implemented");
   }
+  async addNativeDevice(_params) {
+    throw new Error("not implemented");
+  }
   async createMidiClip(_params) {
     throw new Error("not implemented");
   }
@@ -257,6 +260,36 @@ export class MockLiveProvider extends LiveProvider {
     };
     this.createdClips.push(record);
     return record;
+  }
+
+  async addNativeDevice(params) {
+    const track = this._track(params.track_index);
+    const name = String(params.device_name ?? "").trim();
+    if (!name || name.length > 200) {
+      throw new Error("device_name must contain 1 to 200 characters");
+    }
+    let index = params.index === undefined ? -1 : Number(params.index);
+    if (!Number.isInteger(index) || index < -1) {
+      throw new Error("index must be -1 or a non-negative integer");
+    }
+    const devices = this.deviceState[track.index] || (this.deviceState[track.index] = []);
+    const before = devices.length;
+    if (index > before) {
+      throw new Error("device insertion index out of range");
+    }
+    const device = {
+      name,
+      parameters: [
+        { name: "Device On", value: 1, min: 0, max: 1, is_quantized: true, value_items: ["Off", "On"] },
+      ],
+    };
+    if (index === -1) {
+      devices.push(device);
+      index = before;
+    } else {
+      devices.splice(index, 0, device);
+    }
+    return { track: track.name, index, name, device_count: devices.length };
   }
 
   _track(index) {
