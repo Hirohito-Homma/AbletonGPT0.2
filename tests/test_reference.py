@@ -97,3 +97,37 @@ def test_small_band_differences_not_flagged():
 def test_bands_absent_leaves_no_band_delta():
     report = build_reference_comparison(_profile(), _profile())
     assert "bands" not in report["deltas"]
+
+
+def test_wider_mix_guidance():
+    mix = _profile()
+    mix["width_side_ratio"] = 0.40
+    mix["correlation"] = 0.6
+    ref = _profile()
+    ref["width_side_ratio"] = 0.20
+    ref["correlation"] = 0.9
+
+    report = build_reference_comparison(mix, ref)
+
+    assert report["deltas"]["stereo_width"] == 0.2
+    assert any("wider" in note for note in report["guidance"])
+
+
+def test_negative_correlation_flags_mono_compatibility():
+    mix = _profile()
+    mix["width_side_ratio"] = 0.5
+    mix["correlation"] = -0.3
+    ref = _profile()
+    ref["width_side_ratio"] = 0.5
+    ref["correlation"] = 0.8
+
+    report = build_reference_comparison(mix, ref)
+
+    assert report["deltas"]["correlation"] == pytest.approx(-1.1)
+    assert any("mono compatibility" in note for note in report["guidance"])
+
+
+def test_stereo_absent_leaves_no_stereo_delta():
+    report = build_reference_comparison(_profile(), _profile())
+    assert "stereo_width" not in report["deltas"]
+    assert "correlation" not in report["deltas"]

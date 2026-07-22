@@ -18,6 +18,8 @@ _CREST_DB = 1.5
 _TRUE_PEAK_DB = 0.5
 _BRIGHTNESS_RATIO = 0.1  # 10% relative centroid difference
 _BAND_FRACTION = 0.03  # 3 percentage points of band-energy share
+_STEREO_WIDTH = 0.05  # side-energy-share difference
+_CORRELATION = 0.1  # L/R phase-correlation difference
 
 
 def _delta(mix_value: float | None, reference_value: float | None) -> float | None:
@@ -99,6 +101,31 @@ def build_reference_comparison(
                     % ("more" if band_delta > 0 else "less", name.replace("_", " "), band_delta * 100)
                 )
         deltas["bands"] = band_deltas
+
+    # Stereo image: width (side-energy share) and L/R phase correlation.
+    width = _delta(mix.get("width_side_ratio"), reference.get("width_side_ratio"))
+    if width is not None:
+        deltas["stereo_width"] = width
+        if abs(width) >= _STEREO_WIDTH:
+            guidance.append(
+                "Mix stereo image is %s than the reference (side share %+.1f%%)."
+                % ("wider" if width > 0 else "narrower", width * 100)
+            )
+
+    correlation = _delta(mix.get("correlation"), reference.get("correlation"))
+    if correlation is not None:
+        deltas["correlation"] = correlation
+    if correlation is not None and abs(correlation) >= _CORRELATION:
+        if correlation < 0:
+            guidance.append(
+                "Mix L/R correlation is %.2f lower than the reference (%.2f vs %.2f) -- check mono compatibility."
+                % (abs(correlation), mix.get("correlation"), reference.get("correlation"))
+            )
+        else:
+            guidance.append(
+                "Mix is more mono/centred than the reference (correlation %.2f vs %.2f)."
+                % (mix.get("correlation"), reference.get("correlation"))
+            )
 
     if not guidance:
         guidance.append("Mix and reference are closely matched on the measured metrics.")
