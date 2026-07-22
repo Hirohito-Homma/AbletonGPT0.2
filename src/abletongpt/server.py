@@ -10,7 +10,7 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
-from .audio import estimate_tempo
+from .audio import estimate_key, estimate_tempo
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
@@ -98,6 +98,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
             "offline WAV/AIFF tempo (BPM) estimation (requires the audio extra: NumPy)",
+            "offline WAV/AIFF key estimation (requires the audio extra: NumPy)",
             "selectable Live backend: Remote Script (default) or the opt-in Ableton Extensions SDK companion",
         ],
         "safety": [
@@ -351,6 +352,12 @@ def analyze_audio_tempo(
 ) -> dict[str, Any]:
     """WAV/AIFFを変更せず、テンポ(BPM)をオフライン推定する。NumPy(`abletongpt[audio]`)が必要。読み取り専用。"""
     return estimate_tempo(file_path, min_bpm=min_bpm, max_bpm=max_bpm)
+
+
+@mcp.tool()
+def analyze_audio_key(file_path: str) -> dict[str, Any]:
+    """WAV/AIFFを変更せず、キー(調)をオフライン推定する。NumPy(`abletongpt[audio]`)が必要。読み取り専用。"""
+    return estimate_key(file_path)
 
 
 @mcp.tool()
