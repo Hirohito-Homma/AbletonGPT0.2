@@ -5,7 +5,6 @@ import os
 import platform
 import socket
 import threading
-from functools import partial
 
 import Live
 from _Framework.ControlSurface import ControlSurface
@@ -29,6 +28,14 @@ ALLOWED_NATIVE_INSTRUMENTS = (
 # not reliable across every embedded Live Python version we support.
 DEVICE_TYPE_INSTRUMENT = 1
 
+# Upper bound on how long a single command may occupy Live's main thread before
+# the bridge gives up and releases the waiting client with a timeout error. Every
+# command runs on the main thread (see schedule_message in _dispatch); if a Live
+# Object Model call blocks there (e.g. a modal dialog), the client would otherwise
+# hang until its own socket timeout. No legitimate Remote Script command needs
+# anywhere near this long -- the heavy pure-Python work lives in the MCP server.
+DEFAULT_MAIN_THREAD_TIMEOUT = 30.0
+
 
 def create_instance(c_instance):
     return AbletonGPTControlSurface(c_instance)
@@ -43,6 +50,12 @@ class AbletonGPTControlSurface(ControlSurface):
         self._host = "127.0.0.1"
         self._port = int(os.environ.get("ABLETONGPT_PORT", shared_config.get("port", 9877)))
         self._token = os.environ.get("ABLETONGPT_TOKEN", shared_config.get("token", ""))
+        self._main_thread_timeout = float(
+            os.environ.get(
+                "ABLETONGPT_MAIN_THREAD_TIMEOUT",
+                shared_config.get("main_thread_timeout", DEFAULT_MAIN_THREAD_TIMEOUT),
+            )
+        )
         self._stop_event = threading.Event()
         self._server_socket = None
         self._thread = threading.Thread(target=self._serve, name="AbletonGPTBridge")
@@ -105,27 +118,78 @@ class AbletonGPTControlSurface(ControlSurface):
                     break
                 data += chunk
             request = json.loads(data.split(b"\n", 1)[0].decode("utf-8"))
-            if self._token and request.get("token") != self._token:
-                self._send(client, {"ok": False, "error": "unauthorized"})
-                return
-            self.schedule_message(
-                0,
-                partial(self._execute_and_reply, request, client),
-            )
         except Exception as exc:
             self._send(client, {"ok": False, "error": str(exc)})
+            return
 
-    def _execute_and_reply(self, request, client):
-        try:
-            result = self._execute(request.get("command"), request.get("params") or {})
-            self._send(client, {"ok": True, "result": result})
-        except Exception as exc:
-            self._send(client, {"ok": False, "error": str(exc)})
+        if self._token and request.get("token") != self._token:
+            self._send(client, {"ok": False, "error": "unauthorized"})
+            return
+
+        self._dispatch(request, client)
+
+    def _dispatch(self, request, client):
+        """Run one command on Live's main thread, but never let it hang the client.
+
+        The command is scheduled onto Live's main thread (the only thread allowed
+        to touch the Live Object Model). This reader thread then waits for the
+        reply. If the main thread does not finish within ``_main_thread_timeout``
+        -- for instance because a Live Object Model call is blocked on a modal
+        dialog -- we send a timeout error and release the client anyway. A lock
+        guards against sending twice if the main thread finishes late.
+        """
+        lock = threading.Lock()
+        done = threading.Event()
+        state = {"sent": False}
+
+        def reply(response):
+            with lock:
+                if state["sent"]:
+                    return
+                state["sent"] = True
+            self._send(client, response)
+            done.set()
+
+        def run():
+            try:
+                result = self._execute(
+                    request.get("command"), request.get("params") or {}
+                )
+                reply({"ok": True, "result": result})
+            except Exception as exc:
+                reply({"ok": False, "error": str(exc)})
+
+        self.schedule_message(0, run)
+        if not done.wait(self._main_thread_timeout):
+            command = request.get("command")
+            self.log_message(
+                "AbletonGPT: '%s' did not finish on Live's main thread within %.0fs; "
+                "releasing the client with a timeout (the main thread may be blocked, "
+                "e.g. a modal dialog)" % (command, self._main_thread_timeout)
+            )
+            reply(
+                {
+                    "ok": False,
+                    "error": (
+                        "Live did not finish '%s' within %.0fs. The Live main thread "
+                        "may be blocked (for example by a modal dialog). The client "
+                        "was released; check Live's state before retrying."
+                        % (command, self._main_thread_timeout)
+                    ),
+                    "timeout": True,
+                }
+            )
 
     @staticmethod
     def _send(client, response):
+        # The client may already be gone -- for example after a watchdog timeout
+        # released it and the main thread only finished later. Swallow send errors
+        # so a dead socket never propagates into Live's main thread or a reader
+        # thread; always close the socket.
         try:
             client.sendall((json.dumps(response) + "\n").encode("utf-8"))
+        except Exception:
+            pass
         finally:
             try:
                 client.close()
@@ -735,6 +799,23 @@ class AbletonGPTControlSurface(ControlSurface):
                 "launch_mode": "single_scene_fire",
                 "fired": clips,
             }
+        if command == "get_arrangement_clips":
+            track_index = int(params["track_index"])
+            track = self._track(song, track_index)
+            clips = []
+            total_count = 0
+            for clip_index, clip in enumerate(track.arrangement_clips):
+                total_count += 1
+                if len(clips) < 4096:
+                    clips.append(self._arrangement_clip_summary(clip_index, clip))
+            return {
+                "track_index": track_index,
+                "track": track.name,
+                "clips": clips,
+                "clip_count": total_count,
+                "truncated": total_count > len(clips),
+                "read_only": True,
+            }
         if command == "copy_session_clip_to_arrangement":
             track_index = int(params["track_index"])
             clip_index = int(params["clip_index"])
@@ -745,6 +826,10 @@ class AbletonGPTControlSurface(ControlSurface):
             slot = track.clip_slots[clip_index]
             if not slot.has_clip:
                 raise ValueError("source clip slot is empty")
+            self.log_message(
+                "AbletonGPT: copy_session_clip_to_arrangement start "
+                "track=%d clip=%d dest=%s" % (track_index, clip_index, destination_time)
+            )
             target = self._prepare_arrangement_copy(
                 track_index,
                 track,
@@ -752,7 +837,15 @@ class AbletonGPTControlSurface(ControlSurface):
                 destination_time,
             )
             before_count = len(track.arrangement_clips)
+            self.log_message(
+                "AbletonGPT: preflight ok (%d existing clips); calling "
+                "duplicate_clip_to_arrangement" % before_count
+            )
             track.duplicate_clip_to_arrangement(slot.clip, destination_time)
+            self.log_message(
+                "AbletonGPT: duplicate_clip_to_arrangement returned "
+                "(%d -> %d clips)" % (before_count, len(track.arrangement_clips))
+            )
             if len(track.arrangement_clips) != before_count + 1:
                 raise RuntimeError("Live did not create exactly one Arrangement clip")
             arrangement_clip = self._find_arrangement_clip(
@@ -814,6 +907,10 @@ class AbletonGPTControlSurface(ControlSurface):
             copied = []
             for track_index, track, source_clip, prepared in targets:
                 before_count = len(track.arrangement_clips)
+                self.log_message(
+                    "AbletonGPT: copy_scene_to_arrangement track=%d; calling "
+                    "duplicate_clip_to_arrangement" % track_index
+                )
                 track.duplicate_clip_to_arrangement(source_clip, destination_time)
                 if len(track.arrangement_clips) != before_count + 1:
                     raise RuntimeError(
@@ -923,6 +1020,24 @@ class AbletonGPTControlSurface(ControlSurface):
                     % (track_index, track.name)
                 )
         return {"duration": duration, "end_time": end_time}
+
+    @staticmethod
+    def _arrangement_clip_summary(index, clip):
+        # end_time - start_time is the clip's span on the Arrangement timeline and
+        # is defined for both MIDI and audio clips, warped or not (clip.length is
+        # not reliable for unwarped audio), so derive the length from it.
+        start_time = float(clip.start_time)
+        end_time = float(clip.end_time)
+        return {
+            "index": int(index),
+            "name": clip.name,
+            "start_time": start_time,
+            "end_time": end_time,
+            "length_beats": end_time - start_time,
+            "is_audio_clip": bool(clip.is_audio_clip),
+            "is_midi_clip": bool(clip.is_midi_clip),
+            "muted": bool(getattr(clip, "muted", False)),
+        }
 
     @staticmethod
     def _find_arrangement_clip(track, start_time, expected_end_time):
