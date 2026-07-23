@@ -2301,6 +2301,18 @@ def fire_scene(scene_index: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_arrangement_clips(track_index: int) -> dict[str, Any]:
+    """指定トラックのArrangementクリップ(MIDI/audio)を一覧する読み取り専用ツール。
+
+    各クリップの開始/終了拍・長さ・種別・ミュート状態を返す。Session→Arrangementの
+    コピー結果など、Arrangementへの副作用を検証するために使う。変更は一切行わない。
+    """
+    if track_index < 0:
+        raise ValueError("track_index must be non-negative")
+    return bridge.call("get_arrangement_clips", track_index=track_index)
+
+
+@mcp.tool()
 def copy_session_clip_to_arrangement(
     track_index: int,
     clip_index: int,

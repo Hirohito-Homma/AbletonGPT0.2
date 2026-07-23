@@ -358,3 +358,109 @@ def test_expression_apply_rejects_note_count_change_before_clearing_clip():
 
     assert clip.notes == [original]
     assert clip.add_calls == 0
+
+
+class _ArrangementClip:
+    def __init__(self, name, start, end, is_audio=False, muted=False):
+        self.name = name
+        self.start_time = start
+        self.end_time = end
+        self.is_audio_clip = is_audio
+        self.is_midi_clip = not is_audio
+        self.muted = muted
+
+
+class _ArrangementTrack:
+    name = "Arr Track"
+
+    def __init__(self, arrangement_clips):
+        self.arrangement_clips = list(arrangement_clips)
+
+
+class _ArrangementSong:
+    def __init__(self, track):
+        self.tracks = [track]
+
+
+def _arrangement_surface(module, track):
+    surface = module.AbletonGPTControlSurface.__new__(
+        module.AbletonGPTControlSurface
+    )
+    song = _ArrangementSong(track)
+    surface.song = lambda: song
+    return surface
+
+
+def test_get_arrangement_clips_summarises_midi_and_audio():
+    module = _load_remote_script()
+    track = _ArrangementTrack(
+        [
+            _ArrangementClip("Intro", 0.0, 16.0),
+            _ArrangementClip("Drums", 16.0, 32.0, is_audio=True, muted=True),
+        ]
+    )
+    surface = _arrangement_surface(module, track)
+
+    result = surface._execute("get_arrangement_clips", {"track_index": 0})
+
+    assert result["read_only"] is True
+    assert result["clip_count"] == 2
+    assert result["truncated"] is False
+    first, second = result["clips"]
+    assert first == {
+        "index": 0,
+        "name": "Intro",
+        "start_time": 0.0,
+        "end_time": 16.0,
+        "length_beats": 16.0,
+        "is_audio_clip": False,
+        "is_midi_clip": True,
+        "muted": False,
+    }
+    assert second["is_audio_clip"] is True
+    assert second["muted"] is True
+    assert second["length_beats"] == 16.0
+
+
+def _dispatch_surface(module, timeout):
+    surface = module.AbletonGPTControlSurface.__new__(
+        module.AbletonGPTControlSurface
+    )
+    surface._main_thread_timeout = timeout
+    surface._token = ""
+    sent = []
+    surface._send = lambda client, response: sent.append(response)
+    surface.log_message = lambda *args, **kwargs: None
+    return surface, sent
+
+
+def test_dispatch_returns_result_when_main_thread_runs():
+    module = _load_remote_script()
+    surface, sent = _dispatch_surface(module, timeout=5.0)
+    surface._execute = lambda command, params: {"echo": command}
+    # A cooperative scheduler that runs the callback immediately, as Live's main
+    # thread would for a fast command.
+    surface.schedule_message = lambda delay, callback: callback()
+
+    surface._dispatch({"command": "ping", "params": {}}, client=object())
+
+    assert sent == [{"ok": True, "result": {"echo": "ping"}}]
+
+
+def test_dispatch_releases_client_when_main_thread_never_runs():
+    module = _load_remote_script()
+    surface, sent = _dispatch_surface(module, timeout=0.05)
+    pending = []
+    # Simulate a wedged main thread: the callback is scheduled but never invoked.
+    surface.schedule_message = lambda delay, callback: pending.append(callback)
+    surface._execute = lambda command, params: {"echo": command}
+
+    surface._dispatch({"command": "copy_session_clip_to_arrangement", "params": {}}, client=object())
+
+    assert len(sent) == 1
+    assert sent[0]["ok"] is False
+    assert sent[0]["timeout"] is True
+
+    # The main thread finishing late must not send a second, conflicting reply.
+    pending[0]()
+    assert len(sent) == 1
