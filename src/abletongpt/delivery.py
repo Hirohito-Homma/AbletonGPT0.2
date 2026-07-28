@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from threading import RLock
+from typing import Any, Callable
 
 
 _FILE_TYPES = {"wav": "WAV", "aiff": "AIFF"}
@@ -14,6 +17,100 @@ _DITHER_TYPES = {
     "pow-r3": "POW-r 3",
 }
 _PLATFORMS = {"macos", "windows"}
+
+
+class AudioVerificationCache:
+    """Bounded process-local cache for immutable loudness-analysis results."""
+
+    def __init__(self, max_entries: int = 8):
+        if not isinstance(max_entries, int) or max_entries < 1:
+            raise ValueError("max_entries must be a positive integer")
+        self.max_entries = max_entries
+        self._entries: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+        self._lock = RLock()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+    def get_or_analyze(
+        self,
+        *,
+        file_path: str,
+        target_lufs: float | None,
+        target_true_peak_dbtp: float,
+        analyzer: Callable[..., dict[str, Any]],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Return a cached report only when file identity and targets still match."""
+
+        path = Path(file_path).expanduser().resolve()
+        signature_before = _audio_file_signature(path)
+        key = (
+            str(path),
+            signature_before["device"],
+            signature_before["inode"],
+            signature_before["size_bytes"],
+            signature_before["modified_time_ns"],
+            target_lufs,
+            target_true_peak_dbtp,
+        )
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached is not None:
+                self._entries.move_to_end(key)
+                return deepcopy(cached), self._cache_info(
+                    hit=True,
+                    path=path,
+                    signature=signature_before,
+                    target_lufs=target_lufs,
+                    target_true_peak_dbtp=target_true_peak_dbtp,
+                )
+
+        report = analyzer(
+            str(path),
+            target_lufs=target_lufs,
+            target_true_peak_dbtp=target_true_peak_dbtp,
+        )
+        signature_after = _audio_file_signature(path)
+        if signature_after != signature_before:
+            raise ValueError(
+                "audio file changed during analysis; wait for export to finish and retry"
+            )
+
+        with self._lock:
+            self._entries[key] = deepcopy(report)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+        return report, self._cache_info(
+            hit=False,
+            path=path,
+            signature=signature_after,
+            target_lufs=target_lufs,
+            target_true_peak_dbtp=target_true_peak_dbtp,
+        )
+
+    def _cache_info(
+        self,
+        *,
+        hit: bool,
+        path: Path,
+        signature: dict[str, int],
+        target_lufs: float | None,
+        target_true_peak_dbtp: float,
+    ) -> dict[str, Any]:
+        return {
+            "hit": hit,
+            "scope": "mcp-process",
+            "max_entries": self.max_entries,
+            "key": {
+                "path": str(path),
+                "size_bytes": signature["size_bytes"],
+                "modified_time_ns": signature["modified_time_ns"],
+                "target_lufs": target_lufs,
+                "target_true_peak_dbtp": target_true_peak_dbtp,
+            },
+        }
 
 
 def build_audio_export_manifest(
@@ -214,6 +311,7 @@ def verify_audio_export_report(
     file_path: str,
     manifest: dict[str, Any],
     loudness_report: dict[str, Any],
+    analysis_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare an analyzed render to a manifest without modifying the file."""
 
@@ -410,11 +508,24 @@ def verify_audio_export_report(
         },
         "measurements": measurements,
         "analysis_engine": loudness_report.get("analysis_engine"),
+        "analysis_cache": analysis_cache,
         "checks": checks,
         "blocking_failures": blocking_failures,
         "warnings": warning_failures,
         "guidance": guidance,
         "true_peak_note": loudness_report.get("standard", {}).get("true_peak"),
+    }
+
+
+def _audio_file_signature(path: Path) -> dict[str, int]:
+    if not path.is_file():
+        raise ValueError("audio file does not exist")
+    stat = path.stat()
+    return {
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+        "size_bytes": stat.st_size,
+        "modified_time_ns": stat.st_mtime_ns,
     }
 
 

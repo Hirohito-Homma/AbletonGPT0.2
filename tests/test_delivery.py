@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from abletongpt.delivery import (
+    AudioVerificationCache,
     build_audio_export_manifest,
     verify_audio_export_report,
 )
@@ -186,3 +187,87 @@ def test_loudness_target_is_advisory_not_delivery_blocking(tmp_path: Path):
         check for check in report["checks"] if check["name"] == "integrated_lufs"
     )
     assert loudness_check["blocking"] is False
+
+
+def test_verification_cache_reuses_unchanged_file_and_returns_copies(tmp_path: Path):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"first render")
+    cache = AudioVerificationCache(max_entries=2)
+    calls = []
+
+    def analyze(path, **targets):
+        calls.append((path, targets))
+        return {"file": {"path": path}, "measurements": {"integrated_lufs": -9.0}}
+
+    first, first_cache = cache.get_or_analyze(
+        file_path=str(rendered),
+        target_lufs=-9.0,
+        target_true_peak_dbtp=-1.0,
+        analyzer=analyze,
+    )
+    first["measurements"]["integrated_lufs"] = 0.0
+    second, second_cache = cache.get_or_analyze(
+        file_path=str(rendered),
+        target_lufs=-9.0,
+        target_true_peak_dbtp=-1.0,
+        analyzer=analyze,
+    )
+
+    assert len(calls) == 1
+    assert first_cache["hit"] is False
+    assert second_cache["hit"] is True
+    assert second["measurements"]["integrated_lufs"] == -9.0
+    assert second_cache["key"]["size_bytes"] == len(b"first render")
+
+
+def test_verification_cache_invalidates_changed_file_or_targets(tmp_path: Path):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"first")
+    cache = AudioVerificationCache()
+    calls = []
+
+    def analyze(path, **targets):
+        calls.append((path, targets))
+        return {"file": {"path": path}, "measurements": {}}
+
+    cache.get_or_analyze(
+        file_path=str(rendered),
+        target_lufs=-9.0,
+        target_true_peak_dbtp=-1.0,
+        analyzer=analyze,
+    )
+    rendered.write_bytes(b"second render")
+    _, changed_file = cache.get_or_analyze(
+        file_path=str(rendered),
+        target_lufs=-9.0,
+        target_true_peak_dbtp=-1.0,
+        analyzer=analyze,
+    )
+    _, changed_target = cache.get_or_analyze(
+        file_path=str(rendered),
+        target_lufs=-14.0,
+        target_true_peak_dbtp=-1.0,
+        analyzer=analyze,
+    )
+
+    assert len(calls) == 3
+    assert changed_file["hit"] is False
+    assert changed_target["hit"] is False
+
+
+def test_verification_cache_rejects_file_changed_during_analysis(tmp_path: Path):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"incomplete")
+    cache = AudioVerificationCache()
+
+    def analyze(path, **_targets):
+        Path(path).write_bytes(b"completed export")
+        return {"file": {"path": path}, "measurements": {}}
+
+    with pytest.raises(ValueError, match="changed during analysis"):
+        cache.get_or_analyze(
+            file_path=str(rendered),
+            target_lufs=-9.0,
+            target_true_peak_dbtp=-1.0,
+            analyzer=analyze,
+        )

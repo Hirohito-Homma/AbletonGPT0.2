@@ -12,7 +12,11 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
-from .delivery import build_audio_export_manifest, verify_audio_export_report
+from .delivery import (
+    AudioVerificationCache,
+    build_audio_export_manifest,
+    verify_audio_export_report,
+)
 from .audio import (
     analyze_stereo_field,
     detect_onsets,
@@ -106,6 +110,7 @@ mcp = FastMCP(
     port=int(os.getenv("ABLETONGPT_MCP_PORT", "8000")),
 )
 bridge = select_backend()
+_audio_verification_cache = AudioVerificationCache(max_entries=8)
 
 
 @mcp.tool()
@@ -1131,15 +1136,17 @@ def verify_audio_export(
         raise ValueError("manifest must contain a verification object")
     target_lufs = verification.get("target_lufs")
     target_true_peak = float(verification.get("target_true_peak_dbtp", -1.0))
-    loudness_report = analyze_loudness_file(
-        file_path,
+    loudness_report, cache_info = _audio_verification_cache.get_or_analyze(
+        file_path=file_path,
         target_lufs=target_lufs,
         target_true_peak_dbtp=target_true_peak,
+        analyzer=analyze_loudness_file,
     )
     return verify_audio_export_report(
         file_path=file_path,
         manifest=manifest,
         loudness_report=loudness_report,
+        analysis_cache=cache_info,
     )
 
 
