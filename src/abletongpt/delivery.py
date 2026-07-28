@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -111,6 +112,91 @@ class AudioVerificationCache:
                 "target_true_peak_dbtp": target_true_peak_dbtp,
             },
         }
+
+
+def wait_for_stable_audio_file(
+    file_path: str,
+    *,
+    timeout_seconds: float = 120.0,
+    poll_interval_seconds: float = 0.5,
+    stable_seconds: float = 2.0,
+    require_change: bool = False,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Wait until an export exists and its file signature stops changing."""
+
+    timeout = _finite_float(
+        timeout_seconds, "timeout_seconds", minimum=0.1, maximum=3600.0
+    )
+    poll_interval = _finite_float(
+        poll_interval_seconds,
+        "poll_interval_seconds",
+        minimum=0.05,
+        maximum=10.0,
+    )
+    stable_window = _finite_float(
+        stable_seconds, "stable_seconds", minimum=0.1, maximum=60.0
+    )
+    if stable_window > timeout:
+        raise ValueError("stable_seconds must not exceed timeout_seconds")
+
+    path = Path(file_path).expanduser().resolve()
+    started = monotonic()
+    deadline = started + timeout
+    baseline = _try_audio_file_signature(path)
+    candidate: dict[str, int] | None = None
+    stable_since: float | None = None
+    observations = 0
+    change_detected = False
+    ready_for_stability = not require_change
+
+    while True:
+        now = monotonic()
+        signature = _try_audio_file_signature(path)
+        observations += 1
+
+        if require_change and not ready_for_stability:
+            if signature is not None and signature != baseline:
+                ready_for_stability = True
+                change_detected = True
+
+        if signature is None or signature["size_bytes"] == 0 or not ready_for_stability:
+            candidate = None
+            stable_since = None
+        elif signature != candidate:
+            candidate = signature
+            stable_since = now
+            if baseline is not None and signature != baseline:
+                change_detected = True
+        elif stable_since is not None and now - stable_since >= stable_window:
+            return {
+                "read_only": True,
+                "path": str(path),
+                "waited_seconds": round(max(0.0, now - started), 3),
+                "observations": observations,
+                "poll_interval_seconds": poll_interval,
+                "stable_seconds": stable_window,
+                "require_change": bool(require_change),
+                "file_created": baseline is None,
+                "change_detected": change_detected,
+                "signature": {
+                    "size_bytes": signature["size_bytes"],
+                    "modified_time_ns": signature["modified_time_ns"],
+                },
+            }
+
+        remaining = deadline - now
+        if remaining <= 0:
+            expectation = (
+                "a new or changed audio export"
+                if require_change
+                else "a stable audio export"
+            )
+            raise TimeoutError(
+                f"timed out after {timeout:.3f} seconds waiting for {expectation}"
+            )
+        sleeper(min(poll_interval, remaining))
 
 
 def build_audio_export_manifest(
@@ -527,6 +613,13 @@ def _audio_file_signature(path: Path) -> dict[str, int]:
         "size_bytes": stat.st_size,
         "modified_time_ns": stat.st_mtime_ns,
     }
+
+
+def _try_audio_file_signature(path: Path) -> dict[str, int] | None:
+    try:
+        return _audio_file_signature(path)
+    except (OSError, ValueError):
+        return None
 
 
 def _validate_title(title: str) -> str:

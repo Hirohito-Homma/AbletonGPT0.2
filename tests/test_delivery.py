@@ -8,6 +8,7 @@ from abletongpt.delivery import (
     AudioVerificationCache,
     build_audio_export_manifest,
     verify_audio_export_report,
+    wait_for_stable_audio_file,
 )
 
 
@@ -270,4 +271,122 @@ def test_verification_cache_rejects_file_changed_during_analysis(tmp_path: Path)
             target_lufs=-9.0,
             target_true_peak_dbtp=-1.0,
             analyzer=analyze,
+        )
+
+
+def test_wait_for_stable_audio_file_detects_creation_and_completion(tmp_path: Path):
+    rendered = tmp_path / "mix.wav"
+    clock = [0.0]
+
+    def monotonic():
+        return clock[0]
+
+    def sleeper(seconds):
+        clock[0] += seconds
+        if clock[0] == 0.5:
+            rendered.write_bytes(b"partial")
+        elif clock[0] == 1.0:
+            rendered.write_bytes(b"completed export")
+
+    result = wait_for_stable_audio_file(
+        str(rendered),
+        timeout_seconds=3.0,
+        poll_interval_seconds=0.5,
+        stable_seconds=1.0,
+        monotonic=monotonic,
+        sleeper=sleeper,
+    )
+
+    assert result["file_created"] is True
+    assert result["signature"]["size_bytes"] == len(b"completed export")
+    assert result["waited_seconds"] == 2.0
+    assert result["read_only"] is True
+
+
+def test_wait_for_stable_audio_file_can_require_existing_file_to_change(
+    tmp_path: Path,
+):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"old export")
+    clock = [0.0]
+
+    def monotonic():
+        return clock[0]
+
+    def sleeper(seconds):
+        clock[0] += seconds
+        if clock[0] == 1.0:
+            rendered.write_bytes(b"replacement export")
+
+    result = wait_for_stable_audio_file(
+        str(rendered),
+        timeout_seconds=3.0,
+        poll_interval_seconds=0.5,
+        stable_seconds=0.5,
+        require_change=True,
+        monotonic=monotonic,
+        sleeper=sleeper,
+    )
+
+    assert result["file_created"] is False
+    assert result["change_detected"] is True
+    assert result["require_change"] is True
+    assert result["waited_seconds"] == 1.5
+
+
+def test_wait_for_stable_audio_file_times_out_without_required_change(
+    tmp_path: Path,
+):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"unchanged")
+    clock = [0.0]
+
+    def monotonic():
+        return clock[0]
+
+    def sleeper(seconds):
+        clock[0] += seconds
+
+    with pytest.raises(TimeoutError, match="new or changed"):
+        wait_for_stable_audio_file(
+            str(rendered),
+            timeout_seconds=1.0,
+            poll_interval_seconds=0.25,
+            stable_seconds=0.5,
+            require_change=True,
+            monotonic=monotonic,
+            sleeper=sleeper,
+        )
+
+
+def test_wait_for_stable_audio_file_does_not_accept_empty_placeholder(
+    tmp_path: Path,
+):
+    rendered = tmp_path / "mix.wav"
+    rendered.write_bytes(b"")
+    clock = [0.0]
+
+    def monotonic():
+        return clock[0]
+
+    def sleeper(seconds):
+        clock[0] += seconds
+
+    with pytest.raises(TimeoutError, match="stable audio export"):
+        wait_for_stable_audio_file(
+            str(rendered),
+            timeout_seconds=0.5,
+            poll_interval_seconds=0.1,
+            stable_seconds=0.2,
+            monotonic=monotonic,
+            sleeper=sleeper,
+        )
+
+
+def test_wait_for_stable_audio_file_validates_windows(tmp_path: Path):
+    with pytest.raises(ValueError, match="stable_seconds"):
+        wait_for_stable_audio_file(
+            str(tmp_path / "mix.wav"),
+            timeout_seconds=1.0,
+            stable_seconds=2.0,
         )

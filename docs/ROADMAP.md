@@ -15,6 +15,7 @@
 - Offline WAV/AIFF analysis for Integrated/Momentary/Short-term LUFS, LRA, peak, RMS and crest factor
 - Read-only Main-export manifests with exact manual Save/Export settings, naming and overwrite warnings
 - Post-export WAV/AIFF verification for path, format, sample rate, bit depth, channels, duration, LUFS and estimated True Peak
+- Read-only export completion monitoring with file-stability checks and automatic post-export verification
 - macOS setup, diagnostics, MCP configuration examples and automated checks
 
 ## Next: arrangement and production
@@ -39,7 +40,6 @@ The current Live meter snapshot is not a replacement for the implemented offline
 ## Next: trackdown and mastering
 
 - Extend the implemented Main-export manifest to stems, return effects, dither policy and explicit tail handling
-- Add export completion monitoring after a manifest has been approved
 - Mastering target profiles and loudness-matched A/B versions
 - Platform delivery checks without blindly forcing a single LUFS target
 

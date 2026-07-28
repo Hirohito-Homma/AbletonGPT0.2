@@ -20,7 +20,7 @@ ChatGPT / Codex -> MCP server -> localhost TCP -> Ableton Remote Script -> Live 
 - Audio参照: Session／Arrangementクリップの元ファイルパスとWarp情報を読み取り専用で取得
 - ミックス基礎: 音量、パン、Mute、Solo、Send／瞬間メータースナップショット
 - ラウドネス解析: WAV/AIFFのIntegrated／Momentary／Short-term LUFS、LRA、Peak、RMS、Crest Factor
-- 書き出し受け渡し: `plan_audio_export`で保存先・範囲・形式・Normalize・上書き警告を固定し、`verify_audio_export`で形式・尺・LUFS・True Peakを検証
+- 書き出し受け渡し: `plan_audio_export`で保存先・範囲・形式・Normalize・上書き警告を固定し、`wait_for_audio_export`で完了を監視、`verify_audio_export`で形式・尺・LUFS・True Peakを検証
 - エフェクト: 純正デバイス挿入、一覧、オン/オフ、パラメーター変更
 - AIボーカル: 歌詞・Vocal Guide設計、MIDI作成、レンダリング済みWAV取り込み
 - 安全性: localhost限定、共有トークン、入力検証、削除・上書き・任意コード実行なし

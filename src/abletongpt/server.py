@@ -16,6 +16,7 @@ from .delivery import (
     AudioVerificationCache,
     build_audio_export_manifest,
     verify_audio_export_report,
+    wait_for_stable_audio_file,
 )
 from .audio import (
     analyze_stereo_field,
@@ -144,6 +145,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "offline WAV/AIFF loudness analysis",
             "read-only Main-export manifests with exact manual Save/Export settings and overwrite warnings",
             "post-export WAV/AIFF verification for path, format, duration, loudness, sample peak and estimated True Peak",
+            "read-only export completion monitoring with file-stability checks before automatic verification",
             "offline WAV/AIFF tempo (BPM) estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF key estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF chord-progression extraction (requires the audio extra: NumPy)",
@@ -1148,6 +1150,35 @@ def verify_audio_export(
         loudness_report=loudness_report,
         analysis_cache=cache_info,
     )
+
+
+@mcp.tool()
+def wait_for_audio_export(
+    file_path: str,
+    manifest: dict[str, Any],
+    timeout_seconds: float = 120.0,
+    poll_interval_seconds: float = 0.5,
+    stable_seconds: float = 2.0,
+    require_change: bool = False,
+) -> dict[str, Any]:
+    """WAV/AIFFの作成または上書きを読み取り専用で監視し、サイズと更新時刻が安定してから
+    verify_audio_exportを実行する。既存ファイルの再書き出しを待つ場合はrequire_change=true。
+    ファイル、Live Set、Liveの状態は変更しない。"""
+    verification = manifest.get("verification")
+    if not isinstance(verification, dict):
+        raise ValueError("manifest must contain a verification object")
+    watch = wait_for_stable_audio_file(
+        file_path,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        stable_seconds=stable_seconds,
+        require_change=require_change,
+    )
+    report = verify_audio_export(file_path=file_path, manifest=manifest)
+    return {
+        **report,
+        "export_watch": watch,
+    }
 
 
 @mcp.tool()
