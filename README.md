@@ -6,7 +6,7 @@ ChatGPT、Codex、その他のMCPクライアントからAbleton Liveを操作�
 ChatGPT / Codex -> MCP server -> localhost TCP -> Ableton Remote Script -> Live Object Model
 ```
 
-公開する操作は、接続確認、状態取得、初心者向け作曲スケッチ、MIDIクリップ／ノート生成、MIDI/オーディオトラック作成、純正デバイス挿入、エフェクト一覧・オン/オフ・パラメーター変更、再生/停止、テンポ、トラック音量、録音待機、Sessionクリップ起動、SessionからArrangementへの安全なコピーです。任意Python実行、トラックやファイルの削除、Live Set保存は実装していません。
+公開する操作は、接続確認、状態取得、初心者向け作曲スケッチ、MIDIクリップ／ノート生成、MIDI/オーディオトラック作成、純正デバイス挿入、エフェクト一覧・オン/オフ・パラメーター変更、再生/停止、テンポ、トラック音量、録音待機、Sessionクリップ起動、SessionからArrangementへの安全なコピーです。任意Python実行、トラックやファイルの削除、Live Setの自動保存、Mainオーディオの自動書き出しは実装していません。代わりに、公開Live Object Modelの境界を明示した書き出しmanifestと、生成済みWAV/AIFFの読み取り専用検証を提供します。
 
 ## 現在の構成
 
@@ -20,11 +20,12 @@ ChatGPT / Codex -> MCP server -> localhost TCP -> Ableton Remote Script -> Live 
 - Audio参照: Session／Arrangementクリップの元ファイルパスとWarp情報を読み取り専用で取得
 - ミックス基礎: 音量、パン、Mute、Solo、Send／瞬間メータースナップショット
 - ラウドネス解析: WAV/AIFFのIntegrated／Momentary／Short-term LUFS、LRA、Peak、RMS、Crest Factor
+- 書き出し受け渡し: `plan_audio_export`で保存先・範囲・形式・Normalize・上書き警告を固定し、`verify_audio_export`で形式・尺・LUFS・True Peakを検証
 - エフェクト: 純正デバイス挿入、一覧、オン/オフ、パラメーター変更
 - AIボーカル: 歌詞・Vocal Guide設計、MIDI作成、レンダリング済みWAV取り込み
 - 安全性: localhost限定、共有トークン、入力検証、削除・上書き・任意コード実行なし
 
-設計の詳細は [Architecture](docs/ARCHITECTURE.md)、プロンプト例は [Prompt examples](examples/prompts_ja.md) を参照してください。曲構成を計画・実行するコマンドライン（`arrange` / `jobs` / `arrange-run`）の使い方は [アレンジCLIガイド](docs/CLI_ARRANGE_JA.md)、純ロジックエンジンのCLI（`instruments` / `loudness` / `vocal` / `compose` / `contextual` / `expression`）は [エンジンCLIガイド](docs/CLI_ENGINES_JA.md) にまとめています。これらは統合エントリポイント `abletongpt-cli <サブコマンド>` からも呼び出せます。
+設計の詳細は [Architecture](docs/ARCHITECTURE.md)、書き出し境界と検証手順は [書き出しワークフロー](docs/EXPORT_WORKFLOW_JA.md)、プロンプト例は [Prompt examples](examples/prompts_ja.md) を参照してください。曲構成を計画・実行するコマンドライン（`arrange` / `jobs` / `arrange-run`）の使い方は [アレンジCLIガイド](docs/CLI_ARRANGE_JA.md)、純ロジックエンジンのCLI（`instruments` / `loudness` / `vocal` / `compose` / `contextual` / `expression`）は [エンジンCLIガイド](docs/CLI_ENGINES_JA.md) にまとめています。これらは統合エントリポイント `abletongpt-cli <サブコマンド>` からも呼び出せます。
 
 ## 必要なもの
 

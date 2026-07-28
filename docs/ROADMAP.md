@@ -13,6 +13,8 @@
 - Existing device inspection and parameter control
 - AI vocal guide planning and rendered-audio import
 - Offline WAV/AIFF analysis for Integrated/Momentary/Short-term LUFS, LRA, peak, RMS and crest factor
+- Read-only Main-export manifests with exact manual Save/Export settings, naming and overwrite warnings
+- Post-export WAV/AIFF verification for path, format, sample rate, bit depth, channels, duration, LUFS and estimated True Peak
 - macOS setup, diagnostics, MCP configuration examples and automated checks
 
 ## Next: arrangement and production
@@ -36,12 +38,12 @@ The current Live meter snapshot is not a replacement for the implemented offline
 
 ## Next: trackdown and mastering
 
-- Validated export manifests for stems, sample rate, bit depth, dither and tails
-- Export completion verification and naming conventions
+- Extend the implemented Main-export manifest to stems, return effects, dither policy and explicit tail handling
+- Add export completion monitoring after a manifest has been approved
 - Mastering target profiles and loudness-matched A/B versions
 - Platform delivery checks without blindly forcing a single LUFS target
 
-Export and mastering remain manual until a reliable, inspectable and reversible workflow is implemented.
+Live Set saving and Main rendering remain explicit manual actions because the public Live Object Model does not expose them. Planning and post-export verification are implemented; mastering changes remain manual until a reliable, inspectable and reversible apply workflow exists.
 
 ## Next: AI vocals
 
