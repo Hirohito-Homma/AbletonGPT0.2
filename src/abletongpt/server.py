@@ -39,6 +39,7 @@ from .phrase import build_phrase_from_loop
 from .progression import build_progression_analysis
 from .quantize import build_quantize_plan
 from .reference import build_reference_comparison
+from .section_spectral import build_section_spectral_plan
 from .remap import build_scale_remap_plan
 from .reverse import build_reverse_plan
 from .scale import build_scale_quantize_plan, parse_scale
@@ -164,6 +165,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
             "reading the meaning of a song's development into a per-section narrative arc (energy curve, tension, role, and concrete density/dynamics/register/motion change directives) so the same material can be developed with intent",
+            "deciding the frequency-band (per-band EQ move + resulting balance) and stereo-width treatment each song section should get (e.g. filtered airy intro, intimate narrow breakdown, full wide chorus, low-end-mono recommendation); report-only, no NumPy",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
@@ -1874,6 +1876,20 @@ def plan_narrative_arc(structure: list[str]) -> dict[str, Any]:
     レイヤー(どのトラックが鳴るか)はplan_section_layers、実際のクリップ生成は展開系のcreateツールを併用。
     読み取り専用・NumPy不要。"""
     return build_narrative_arc(list(structure))
+
+
+@mcp.tool()
+def plan_section_spectral_balance(structure: list[str]) -> dict[str, Any]:
+    """Liveを変更せず、曲構造から「帯域とステレオをセクションごとに」判断した処理計画を返す。
+    各セクションのアーキタイプとエネルギー(plan_narrative_arcと同じ読み)に基づき、5バンド
+    (low/low_mid/mid/high_mid/high)ごとのEQ移動量(gain_db)と処理(boost/cut/neutral)、その結果の
+    バンドバランス(合計1.0、targetsのジャンル基準やanalyze_audio_spectral_bandsと比較可能)、
+    ステレオ幅(0..1、エネルギーとブレンド)と狭い/標準/広いのラベル、低域をモノにするか(low_mono)を返す。
+    定石:intro=ハイパス気味で空気感・広さ控えめ、breakdown=低域を落とし中域中心で狭く親密に、
+    build=上を開いて広げる、chorus/drop=フルレンジで広く、低域は基本モノ。中立ベースラインはstreaming基準。
+    LiveのAPIはアレンジ上のEQ/幅をセクションごとに自動化できないため、これはreport-only(適用は手動/今後)。
+    NumPy不要。"""
+    return build_section_spectral_plan(list(structure))
 
 
 @mcp.tool()

@@ -162,6 +162,17 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   a section carries and *what change* it deserves, so the same material can be developed with intent
   rather than repeated verbatim. Reuses `layering.section_archetype`. Read-only plan
   (`plan_narrative_arc`); a create/apply tool consumes the directives. Pure, stdlib-only.
+- **`section_spectral.py`** — `build_section_spectral_plan(structure)` decides the frequency-band
+  and stereo treatment each section should get. It reads the narrative arc (reusing
+  `narrative.build_narrative_arc` for archetype + energy) and, per section, reports a per-band EQ
+  move (`gain_db` for low/low_mid/mid/high_mid/high) + `treatment` (boost/cut/neutral), the
+  resulting `band_balance` (fractions summing to 1.0, comparable to `targets.py` and
+  `audio.extract_spectral_bands`), a `stereo_width` (0..1, the archetype base width blended with the
+  section energy) + label, and a `low_mono` recommendation. Conventions: a high-passed airy intro,
+  an intimate narrow breakdown, a full wide chorus, low end kept mono. The neutral baseline is the
+  `streaming` target balance, so the numbers line up with the mixing tools. Report-only
+  (`plan_section_spectral_balance`) — Live can't automate per-section EQ/width across the
+  arrangement via the bridge. Pure, stdlib-only.
 - **`timescale.py`** — `build_timescale_plan` scales every note's start/duration and the clip
   length by a factor: 2.0 = half-time (slower/longer), 0.5 = double-time (faster/shorter);
   `factor_for` maps the `"half"`/`"double"` modes. Pitch/velocity/probability and the note count
