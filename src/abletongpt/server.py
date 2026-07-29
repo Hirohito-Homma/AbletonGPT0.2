@@ -25,6 +25,7 @@ from .audio import (
     track_beats,
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
+from .develop import build_developed_arrangement
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .groove import build_velocity_groove_plan
@@ -164,6 +165,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
             "reading the meaning of a song's development into a per-section narrative arc (energy curve, tension, role, and concrete density/dynamics/register/motion change directives) so the same material can be developed with intent",
+            "developing one MIDI loop into a full narrative arrangement: rebuilding the loop differently in every section per the narrative directives (thin intro, varied verses, a build that fills into a full octave-doubled chorus, an intimate breakdown) and concatenating them into one long clip (plan then create into an empty slot; never overwrites the source)",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
@@ -1762,6 +1764,78 @@ def create_phrase_from_loop(
         "destination_clip_index": destination_clip_index,
         "created": created,
         "next_step": "生成したフレーズを再生して確認してください。元ループは変更していません。",
+    }
+
+
+@mcp.tool()
+def plan_developed_arrangement(
+    track_index: int,
+    clip_index: int,
+    structure: list[str],
+    section_repeats: int = 2,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Liveを変更せず、1本のMIDIループを「物語のあるアレンジ」へ発展させるプランを作る。structure(セクションの
+    ラベル列)ごとにループをsection_repeats回タイル展開し、そのセクションのナラティブ・ディレクティブ
+    (plan_narrative_arcと同じ読み:密度/register/velocity/繰り返しの変化vary/次への繋ぎ)で作り替え、全セクションを
+    1本の長いクリップに連結する。定石:intro=薄く、verse=戻るたび変化、build=フィルで盛り上げてサビへ、
+    chorus/climax=フルでトップをオクターブ重ね、breakdown=低音を抜いて親密に。phraseの「そのまま反復」とは違い、
+    セクションごとに変化させて起承転結を作る。音数と長さが増えるので空スロットへ書き出す(create_developed_arrangement)。
+    決定的(同じループ+structure+seedは常に同じ結果)。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_developed_arrangement(clip_data, list(structure), section_repeats=section_repeats, seed=seed)
+    plan["next_step"] = (
+        "空きスロットを選び、create_developed_arrangementに同じ引数とdestination_clip_index、"
+        "expected_source_fingerprint=%s を渡して書き出してください。" % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def create_developed_arrangement(
+    track_index: int,
+    clip_index: int,
+    structure: list[str],
+    destination_clip_index: int,
+    section_repeats: int = 2,
+    seed: int = 0,
+    destination_track_index: int = -1,
+    name: str = "",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_developed_arrangementで確認した物語アレンジを、空きSessionスロットへ新規クリップとして書き出す。
+    1本のループをstructureに沿ってセクションごとに変化させながら連結し、destination_clip_index(省略時は同一track)の
+    空スロットへcreate_midi_clipで作成する(占有スロットは拒否=非破壊)。expected_source_fingerprintを渡すと確認後に
+    元クリップが変わっていた場合は拒否する。読み取り以外の副作用は新規クリップ作成のみ。"""
+    if track_index < 0 or clip_index < 0 or destination_clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_developed_arrangement(clip_data, list(structure), section_repeats=section_repeats, seed=seed)
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    destination_track = track_index if destination_track_index < 0 else destination_track_index
+    clip_name = name or "%s story" % clip_data.get("clip", "Loop")
+    created = bridge.call(
+        "create_midi_clip",
+        track_index=destination_track,
+        clip_index=destination_clip_index,
+        name=clip_name,
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    return {
+        "structure": plan["structure"],
+        "section_repeats": plan["section_repeats"],
+        "seed": plan["seed"],
+        "shape": plan["shape"],
+        "peak_label": plan["peak_label"],
+        "length_beats": plan["length_beats"],
+        "note_count": plan["note_count"],
+        "sections": plan["sections"],
+        "destination_track_index": destination_track,
+        "destination_clip_index": destination_clip_index,
+        "created": created,
+        "next_step": "生成したアレンジを再生して確認してください。元ループは変更していません。",
     }
 
 
