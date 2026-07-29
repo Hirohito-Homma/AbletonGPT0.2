@@ -33,6 +33,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .layering import build_layering_plan
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .narrative import build_narrative_arc
 from .notelength import build_legato_plan, build_split_plan
 from .phrase import build_phrase_from_loop
 from .progression import build_progression_analysis
@@ -162,6 +163,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
+            "reading the meaning of a song's development into a per-section narrative arc (energy curve, tension, role, and concrete density/dynamics/register/motion change directives) so the same material can be developed with intent",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
@@ -1858,6 +1860,20 @@ def _layering_tracks(track_roles: list[str] | None) -> list[dict[str, Any]]:
             entry["role"] = role
         resolved.append(entry)
     return resolved
+
+
+@mcp.tool()
+def plan_narrative_arc(structure: list[str]) -> dict[str, Any]:
+    """Liveを変更せず、曲構造(セクションのラベル列)から「展開の意味」を読み取ったナラティブ弧を返す。
+    各セクションにエネルギー値(0..1)を、定石に沿って文脈付きで割り当てる:intro=薄い、build=次のサビへ向けて
+    上昇、breakdownで一度落としてから最後のサビが最も強く当たる、繰り返されるセクション(2回目のverse/chorus)は
+    毎回少しずつ大きくなる。各セクションについてtension(上昇/下降/維持)、役割(setup/development/climax/
+    release/resolution/reset)、具体的な変化ディレクティブ(density/dynamics/register/次への繋ぎmotion/
+    目標velocity/繰り返しは変化を付けるかvary)を返し、全体ではエネルギーカーブ・ピーク位置・形(front-loaded/
+    arch/climactic)を返す。同じ素材を「機械的な反復」ではなく「意図を持った展開」にするための土台。
+    レイヤー(どのトラックが鳴るか)はplan_section_layers、実際のクリップ生成は展開系のcreateツールを併用。
+    読み取り専用・NumPy不要。"""
+    return build_narrative_arc(list(structure))
 
 
 @mcp.tool()
