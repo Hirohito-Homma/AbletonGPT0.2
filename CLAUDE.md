@@ -152,6 +152,16 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   name keyword). Read-only plan. The `plan_section_layers` tool builds it from `get_state`;
   `apply_section_layer` sets each track's mute to match one chosen section via `set_track_mute`
   (mute toggles only — trivially reversible, no track/clip changes). Pure, stdlib-only.
+- **`narrative.py`** — `build_narrative_arc(structure)` reads the *meaning* of a song's development
+  into a per-section arc: each section gets an `energy` (0..1) shaped by arrangement conventions
+  (sparse intro, a `build` that ramps toward the next chorus, a `breakdown` that drops before a
+  harder final chorus, a returning verse/chorus that grows each time), plus its `tension`
+  (rise/fall/hold/open), a narrative `role` (setup/development/climax/release/resolution/reset), and
+  concrete change `directives` (density/dynamics/register/`motion` into the next section/target
+  velocity/`vary`). Where `layering.py` decides *which* tracks play, this decides *how much energy*
+  a section carries and *what change* it deserves, so the same material can be developed with intent
+  rather than repeated verbatim. Reuses `layering.section_archetype`. Read-only plan
+  (`plan_narrative_arc`); a create/apply tool consumes the directives. Pure, stdlib-only.
 - **`timescale.py`** — `build_timescale_plan` scales every note's start/duration and the clip
   length by a factor: 2.0 = half-time (slower/longer), 0.5 = double-time (faster/shorter);
   `factor_for` maps the `"half"`/`"double"` modes. Pitch/velocity/probability and the note count
