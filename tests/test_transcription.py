@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from abletongpt.transcription import (
+    build_locators_from_sections,
     build_locators_from_structure,
     build_midi_from_chords,
     build_midi_from_melody,
@@ -213,3 +214,66 @@ def test_include_end_adds_final_locator():
 def test_locators_reject_bad_tempo():
     with pytest.raises(ValueError):
         build_locators_from_structure(_structure([(0.0, 5.0, "A")]), 0.0)
+
+
+def test_locators_from_sections_convert_bars_to_beats_without_a_tempo():
+    """Bar numbers map to beats through the time signature alone."""
+    plan = build_locators_from_sections(
+        [
+            {"name": "intro", "start_bar": 1},
+            {"name": "drop", "start_bar": 17},
+            {"name": "outro", "start_bar": 33, "length_bars": 8},
+        ]
+    )
+
+    assert plan["beats_per_bar"] == 4.0
+    assert [locator["time_beats"] for locator in plan["locators"]] == [0.0, 64.0, 128.0]
+    assert [locator["name"] for locator in plan["locators"]] == ["1 intro", "2 drop", "3 outro"]
+    assert plan["count"] == 3
+
+
+def test_locators_from_sections_honour_the_time_signature():
+    plan = build_locators_from_sections(
+        [{"name": "a", "start_bar": 1}, {"name": "b", "start_bar": 5}],
+        time_signature="3/4",
+    )
+
+    assert plan["beats_per_bar"] == 3.0
+    assert [locator["time_beats"] for locator in plan["locators"]] == [0.0, 12.0]
+
+
+def test_locators_from_sections_can_close_with_an_end_marker():
+    plan = build_locators_from_sections(
+        [{"name": "a", "start_bar": 1}, {"name": "b", "start_bar": 9, "length_bars": 8}],
+        include_end=True,
+    )
+
+    assert plan["locators"][-1]["name"] == "End"
+    assert plan["locators"][-1]["time_beats"] == 64.0
+
+
+def test_locators_from_sections_reject_unusable_input():
+    import pytest
+
+    with pytest.raises(ValueError):
+        build_locators_from_sections([])
+    with pytest.raises(ValueError):
+        build_locators_from_sections([{"name": "a", "start_bar": 0}])
+    with pytest.raises(ValueError):
+        build_locators_from_sections([{"name": "a"}])
+    with pytest.raises(ValueError):
+        # out of order / duplicate starts would place locators on top of each other
+        build_locators_from_sections(
+            [{"name": "a", "start_bar": 9}, {"name": "b", "start_bar": 5}]
+        )
+    with pytest.raises(ValueError):
+        build_locators_from_sections([{"name": "a", "start_bar": 1}], time_signature="4/0")
+    with pytest.raises(ValueError):
+        # include_end has nothing to measure without a length
+        build_locators_from_sections([{"name": "a", "start_bar": 1}], include_end=True)
+
+
+def test_locators_from_sections_name_unnamed_sections():
+    plan = build_locators_from_sections([{"start_bar": 1}, {"start_bar": 5}])
+
+    assert [locator["name"] for locator in plan["locators"]] == ["1 Section 1", "2 Section 2"]

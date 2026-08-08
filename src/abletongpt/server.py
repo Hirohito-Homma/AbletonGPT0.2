@@ -47,6 +47,7 @@ from .targets import get_target, list_targets
 from .timescale import build_timescale_plan, factor_for
 from .transpose import build_transpose_plan, shift_to_target_pc
 from .transcription import (
+    build_locators_from_sections,
     build_locators_from_structure,
     build_midi_from_chords,
     build_midi_from_melody,
@@ -1427,11 +1428,100 @@ def create_arrangement_locators_from_structure(
     plan = build_locators_from_structure(structure, tempo, include_end=include_end)
     if not plan["locators"]:
         raise ValueError("no sections detected; nothing to place")
-    bridge_locators = [
-        {"time": locator["time_beats"], "name": locator["name"]} for locator in plan["locators"]
-    ]
-    result = bridge.call("add_locators", locators=bridge_locators)
+    result = _place_locators(plan["locators"])
     result["source"] = "audio_structure"
+    result["planned_count"] = plan["count"]
+    return result
+
+
+def _place_locators(locators: list[dict[str, Any]]) -> dict[str, Any]:
+    """Place Arrangement locators, one Live tick per step.
+
+    ``set_or_delete_cue`` acts at the transport position and is a toggle, so the
+    playhead must be moved first. Live applies a transport move on a *later*
+    tick, which means the move and the toggle cannot share a command: doing so
+    toggled a cue at the old position, which either put the locator in the wrong
+    place or deleted an existing one. Each bridge call is its own tick, so the
+    move, the confirmation and the toggle are three separate calls.
+    """
+    state = bridge.call("get_transport_state")
+    original_time = float(state["current_song_time"])
+    created: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    try:
+        for locator in locators:
+            time = float(locator["time_beats"])
+            name = str(locator["name"])
+            bridge.call("jump_transport", time=time)
+            moved = bridge.call("get_transport_state")
+            actual = float(moved["current_song_time"])
+            if abs(actual - time) > 1e-4:
+                skipped.append(
+                    {
+                        "time": time,
+                        "name": name,
+                        "reason": "transport reached %g, not %g" % (actual, time),
+                    }
+                )
+                continue
+            result = bridge.call(
+                "toggle_cue_at_playhead", expected_time=time, name=name
+            )
+            if result.get("created"):
+                created.append({"time": result["time"], "name": name})
+            else:
+                skipped.append(
+                    {"time": time, "name": name, "reason": result.get("reason", "refused")}
+                )
+    finally:
+        bridge.call("jump_transport", time=original_time)
+
+    final = bridge.call("get_transport_state")
+    return {
+        "created": created,
+        "skipped": skipped,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "total_cue_points": final.get("cue_count"),
+    }
+
+
+@mcp.tool()
+def get_transport_state() -> dict[str, Any]:
+    """Arrangementのトランスポート位置・曲長・ループ・既存ロケーター一覧を読み取り専用で取得する。
+    ロケーター配置は「再生ヘッドを動かしてからキューをトグルする」ため、意図しない位置に付く場合に
+    current_song_time/start_timeのどちらが動いたか、ループや曲長が制約していないかを実測で確認できる。
+    Liveを一切変更しない。Remote Scriptバックエンド必須。"""
+    return bridge.call("get_transport_state")
+
+
+@mcp.tool()
+def plan_arrangement_locators_from_sections(
+    sections: list[dict[str, Any]],
+    time_signature: str = "4/4",
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """既知のセクション一覧(name/start_bar、1始まり)からArrangementロケーターの計画を返す。
+    オーディオ解析もtempoも不要(小節→拍は拍子だけで決まる)。include_endで末尾にEndロケーター。読み取り専用。"""
+    return build_locators_from_sections(
+        sections, time_signature=time_signature, include_end=include_end
+    )
+
+
+@mcp.tool()
+def create_arrangement_locators_from_sections(
+    sections: list[dict[str, Any]],
+    time_signature: str = "4/4",
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """既知のセクション一覧からArrangementに名前付きロケーターを追加する。既にロケーターがある位置はスキップ
+    (追加のみ・既存は削除しない)。作曲済みの構成をそのまま置ける。まずplan_arrangement_locators_from_sectionsで確認すること。
+    Remote Scriptバックエンド必須。NumPyは不要。"""
+    plan = build_locators_from_sections(
+        sections, time_signature=time_signature, include_end=include_end
+    )
+    result = _place_locators(plan["locators"])
+    result["source"] = "explicit_sections"
     result["planned_count"] = plan["count"]
     return result
 
