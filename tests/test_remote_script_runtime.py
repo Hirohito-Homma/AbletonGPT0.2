@@ -688,3 +688,143 @@ def test_an_instrument_still_loads_onto_an_empty_track():
     surface._load_preset(song, 0, "instruments", [], "Operator")
 
     assert helper.loaded == ["Operator"]
+
+
+class _Envelope:
+    def __init__(self):
+        self.steps = []
+
+    def insert_step(self, start, length, value):
+        self.steps.append((start, length, value))
+
+    def value_at_time(self, time):
+        """Left-continuous, like Live: on a boundary this returns the step ending there."""
+        for start, length, value in self.steps:
+            if start < time <= start + length:
+                return value
+        return 0.0
+
+
+class _EnvelopeClip:
+    def __init__(self, arrangement=False):
+        self.name = "KIHACHI Chords (full)"
+        self.arrangement = arrangement
+        self.envelopes = {}
+
+    def automation_envelope(self, parameter):
+        # Live returns None for Arrangement clips, and None when none exists yet.
+        if self.arrangement:
+            return None
+        return self.envelopes.get(id(parameter))
+
+    def create_automation_envelope(self, parameter):
+        if self.arrangement:
+            return None
+        envelope = _Envelope()
+        self.envelopes[id(parameter)] = envelope
+        return envelope
+
+
+class _EnvelopeSlot:
+    def __init__(self, clip):
+        self.clip = clip
+        self.has_clip = clip is not None
+
+
+class _EnvelopeTrack:
+    def __init__(self, clip, parameter):
+        self.name = "KIHACHI Chords"
+        self.clip_slots = [_EnvelopeSlot(clip)]
+        self.devices = [types.SimpleNamespace(name="Echo", parameters=[parameter])]
+
+
+def _envelope_surface(clip, parameter):
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    track = _EnvelopeTrack(clip, parameter)
+    surface._track = lambda song, index: track
+    surface._parameter = lambda song, t, d, p: (parameter, track.devices[0])
+    return surface, track
+
+
+def _dry_wet():
+    return types.SimpleNamespace(name="Dry Wet", min=0.0, max=1.0, is_enabled=True)
+
+
+def test_clip_envelope_writes_steps_and_reads_them_back():
+    clip = _EnvelopeClip()
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    result = surface._set_clip_envelope(
+        None,
+        {
+            "track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+            "steps": [
+                {"start": 0.0, "length": 64.0, "value": 0.30},
+                {"start": 320.0, "length": 64.0, "value": 1.00},
+            ],
+        },
+    )
+
+    assert result["step_count"] == 2
+    assert result["parameter"] == "Dry Wet"
+    # the write is verified by reading the envelope back, not assumed
+    assert [s["value_at_time"] for s in result["steps"]] == [0.30, 1.00]
+    assert result["verified_step_count"] == 2
+    assert all(step["matches"] for step in result["steps"])
+
+
+def test_clip_envelope_refuses_values_outside_the_parameter_range():
+    clip = _EnvelopeClip()
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 1.5}]},
+        )
+    except ValueError as exc:
+        assert "out of range" in str(exc)
+    else:
+        raise AssertionError("an out-of-range value must be refused")
+
+    # nothing was written, not even the valid steps of a partially bad batch
+    assert clip.envelopes == {}
+
+
+def test_clip_envelope_says_so_when_live_refuses_an_arrangement_clip():
+    """Live documents automation_envelope as returning None for Arrangement clips."""
+    clip = _EnvelopeClip(arrangement=True)
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 0.5}]},
+        )
+    except ValueError as exc:
+        assert "Session clips only" in str(exc)
+    else:
+        raise AssertionError("an Arrangement clip must be reported, not silently skipped")
+
+
+def test_clip_envelope_refuses_an_empty_slot():
+    parameter = _dry_wet()
+    surface, track = _envelope_surface(None, parameter)
+    track.clip_slots = [_EnvelopeSlot(None)]
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 0.5}]},
+        )
+    except ValueError as exc:
+        assert "empty" in str(exc)
+    else:
+        raise AssertionError("an empty clip slot must be refused")

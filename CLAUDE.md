@@ -224,6 +224,16 @@ Script. New tools must uphold them:
   refuses unless the transport actually arrived; that refusal is what keeps a toggle from deleting
   someone else's locator. Both `create_arrangement_locators_from_structure` (audio-detected) and
   `create_arrangement_locators_from_sections` (explicit, tempo-free) go through this path.
+- Clip envelopes (`set_clip_parameter_envelope` → `set_clip_envelope`) are a **Session-clip**
+  feature: Live documents `automation_envelope` as returning None for Arrangement clips, and it
+  exposes no API for writing Arrangement automation lanes at all. An envelope written on a Session
+  clip *does* travel with the clip into the Arrangement, so the order is create the clip in a
+  Session slot → write the envelope → `copy_session_clip_to_arrangement`. Writing after the copy
+  silently automates nothing, so the command refuses an Arrangement clip instead. Values are
+  range-checked against the parameter before anything is written (no partial batch), and the result
+  reports `value_at_time` sampled at the **middle** of each step: `value_at_time` is
+  left-continuous, so sampling exactly on a step boundary returns the step that *ends* there and
+  makes a correct write look like an off-by-one failure.
 - `get_transport_state` is read-only and is the way to check any of the above: transport position,
   `start_time`, `song_length`, loop, and the existing cue list.
 - Device parameter changes are range-checked; Live-disabled or macro-controlled parameters are

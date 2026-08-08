@@ -204,3 +204,54 @@ def test_transport_state_is_read_only(monkeypatch):
     assert bridge.calls[0][1] == {}
     assert result["current_song_time"] == 512.0
     assert result["read_only"] is True
+
+
+class _EnvelopeBridge(FakeBridge):
+    def call(self, command: str, **params):
+        self.calls.append((command, params))
+        if command == "set_clip_envelope":
+            return {"step_count": len(params["steps"]), "parameter": "Dry Wet"}
+        return super().call(command, **params)
+
+
+def test_envelope_steps_are_validated_before_the_bridge_is_touched(monkeypatch):
+    bridge = _EnvelopeBridge()
+    monkeypatch.setattr(server, "bridge", bridge)
+
+    bad = [
+        [],
+        [{"start": -1.0, "length": 4.0, "value": 0.3}],
+        [{"start": 0.0, "length": 0.0, "value": 0.3}],
+        [{"start": 0.0, "length": 4.0}],
+        [{"start": 0.0, "length": 4.0, "value": 0.3}] * (server.MAX_ENVELOPE_STEPS + 1),
+    ]
+    for steps in bad:
+        with pytest.raises(ValueError):
+            server.set_clip_parameter_envelope(3, 0, 1, 52, steps)
+    assert bridge.calls == []
+
+
+def test_envelope_steps_reach_the_bridge_unchanged(monkeypatch):
+    bridge = _EnvelopeBridge()
+    monkeypatch.setattr(server, "bridge", bridge)
+    steps = [
+        {"start": 0.0, "length": 64.0, "value": 0.30},
+        {"start": 320.0, "length": 64.0, "value": 1.00},
+    ]
+
+    result = server.set_clip_parameter_envelope(3, 0, 1, 52, steps)
+
+    command, params = bridge.calls[0]
+    assert command == "set_clip_envelope"
+    assert params["steps"] == steps
+    assert params["track_index"] == 3 and params["parameter_index"] == 52
+    assert result["step_count"] == 2
+
+
+def test_negative_indices_are_refused(monkeypatch):
+    bridge = _EnvelopeBridge()
+    monkeypatch.setattr(server, "bridge", bridge)
+
+    with pytest.raises(ValueError):
+        server.set_clip_parameter_envelope(-1, 0, 1, 52, [{"start": 0, "length": 4, "value": 0.5}])
+    assert bridge.calls == []
