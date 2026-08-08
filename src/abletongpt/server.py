@@ -1486,6 +1486,46 @@ def _place_locators(locators: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+MAX_ENVELOPE_STEPS = 512
+
+
+@mcp.tool()
+def set_clip_parameter_envelope(
+    track_index: int,
+    clip_index: int,
+    device_index: int,
+    parameter_index: int,
+    steps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """SessionクリップにデバイスパラメーターのステップEnvelope(オートメーション)を書き込む。
+    stepsは{start,length,value}(クリップ内の拍)。値はパラメーターの範囲で検証し、書き込み後にvalue_at_timeで
+    読み戻して返す。Live APIではクリップEnvelopeはSessionクリップ専用(Arrangementクリップはnullを返す)なので、
+    Arrangementへ反映したい場合は先にここへ書いてからcopy_session_clip_to_arrangementすること。
+    先にget_track_devicesでパラメーターの範囲を確認すること。Remote Scriptバックエンド必須。"""
+    if min(track_index, clip_index, device_index, parameter_index) < 0:
+        raise ValueError("indices must be non-negative")
+    if not steps:
+        raise ValueError("steps must be a non-empty list")
+    if len(steps) > MAX_ENVELOPE_STEPS:
+        raise ValueError("steps must contain at most %d entries" % MAX_ENVELOPE_STEPS)
+    for step in steps:
+        for key in ("start", "length", "value"):
+            if key not in step:
+                raise ValueError("each step needs start, length and value")
+        if float(step["start"]) < 0:
+            raise ValueError("step start must be non-negative")
+        if float(step["length"]) <= 0:
+            raise ValueError("step length must be positive")
+    return bridge.call(
+        "set_clip_envelope",
+        track_index=track_index,
+        clip_index=clip_index,
+        device_index=device_index,
+        parameter_index=parameter_index,
+        steps=steps,
+    )
+
+
 @mcp.tool()
 def get_transport_state() -> dict[str, Any]:
     """Arrangementのトランスポート位置・曲長・ループ・既存ロケーター一覧を読み取り専用で取得する。

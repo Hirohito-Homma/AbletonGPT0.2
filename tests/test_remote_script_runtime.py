@@ -591,3 +591,240 @@ def test_transport_state_tolerates_properties_a_live_version_lacks():
 
     assert state["song_length"] is None
     assert state["current_song_time"] == 8.0
+
+
+class _BrowserItem:
+    def __init__(self, name, is_folder=False, is_loadable=True):
+        self.name = name
+        self.is_folder = is_folder
+        self.is_loadable = is_loadable
+        self.children = []
+
+
+class _PresetTrack:
+    def __init__(self, devices):
+        self.name = "Chords"
+        self.devices = list(devices)
+
+
+class _PresetSurface:
+    """Just enough surface to exercise _load_preset's guard."""
+
+    def __init__(self, module, track, item):
+        self._module = module
+        self._track = track
+        self._item = item
+        self.loaded = []
+        self.BROWSER_CATEGORIES = module.AbletonGPTControlSurface.BROWSER_CATEGORIES
+        self.EFFECT_ONLY_CATEGORIES = module.AbletonGPTControlSurface.EFFECT_ONLY_CATEGORIES
+
+    _is_instrument = staticmethod(
+        lambda device: int(device.type) == 1
+    )
+
+    def _track_lookup(self, song, index):
+        return self._track
+
+    def _resolve_browser_node(self, category, path):
+        node = _BrowserItem("root", is_folder=True)
+        node.children = [self._item]
+        return node
+
+    def application(self):
+        surface = self
+
+        class _Browser:
+            def load_item(self, item):
+                surface.loaded.append(item.name)
+                surface._track.devices.append(types.SimpleNamespace(type=2, name=item.name))
+
+        return types.SimpleNamespace(browser=_Browser())
+
+
+def _preset_surface(devices, item_name="Delay", category_item=None):
+    module = _load_remote_script()
+    track = _PresetTrack(devices)
+    item = category_item or _BrowserItem(item_name)
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    helper = _PresetSurface(module, track, item)
+    surface._resolve_browser_node = helper._resolve_browser_node
+    surface.application = helper.application
+    surface._track = lambda song, index: track
+    song = types.SimpleNamespace(view=types.SimpleNamespace(selected_track=None))
+    return surface, track, helper, song
+
+
+def test_an_effect_may_be_loaded_onto_a_track_that_already_has_an_instrument():
+    """A delay after a synth is ordinary signal-chain work and replaces nothing."""
+    instrument = types.SimpleNamespace(type=1, name="Wavetable")
+    surface, track, helper, song = _preset_surface([instrument])
+
+    result = surface._load_preset(song, 0, "audio_effects", [], "Delay")
+
+    assert helper.loaded == ["Delay"]
+    assert result["added_device_count"] == 1
+    # the instrument is still there, first in the chain
+    assert track.devices[0] is instrument
+
+
+def test_an_instrument_preset_is_still_refused_on_a_track_that_has_one():
+    instrument = types.SimpleNamespace(type=1, name="Wavetable")
+    surface, track, helper, song = _preset_surface([instrument], item_name="Operator")
+
+    try:
+        surface._load_preset(song, 0, "instruments", [], "Operator")
+    except ValueError as exc:
+        assert "already contains an instrument" in str(exc)
+    else:
+        raise AssertionError("loading an instrument over an instrument must be refused")
+
+    assert helper.loaded == []
+    assert track.devices == [instrument]
+
+
+def test_an_instrument_still_loads_onto_an_empty_track():
+    surface, track, helper, song = _preset_surface([], item_name="Operator")
+
+    surface._load_preset(song, 0, "instruments", [], "Operator")
+
+    assert helper.loaded == ["Operator"]
+
+
+class _Envelope:
+    def __init__(self):
+        self.steps = []
+
+    def insert_step(self, start, length, value):
+        self.steps.append((start, length, value))
+
+    def value_at_time(self, time):
+        """Left-continuous, like Live: on a boundary this returns the step ending there."""
+        for start, length, value in self.steps:
+            if start < time <= start + length:
+                return value
+        return 0.0
+
+
+class _EnvelopeClip:
+    def __init__(self, arrangement=False):
+        self.name = "KIHACHI Chords (full)"
+        self.arrangement = arrangement
+        self.envelopes = {}
+
+    def automation_envelope(self, parameter):
+        # Live returns None for Arrangement clips, and None when none exists yet.
+        if self.arrangement:
+            return None
+        return self.envelopes.get(id(parameter))
+
+    def create_automation_envelope(self, parameter):
+        if self.arrangement:
+            return None
+        envelope = _Envelope()
+        self.envelopes[id(parameter)] = envelope
+        return envelope
+
+
+class _EnvelopeSlot:
+    def __init__(self, clip):
+        self.clip = clip
+        self.has_clip = clip is not None
+
+
+class _EnvelopeTrack:
+    def __init__(self, clip, parameter):
+        self.name = "KIHACHI Chords"
+        self.clip_slots = [_EnvelopeSlot(clip)]
+        self.devices = [types.SimpleNamespace(name="Echo", parameters=[parameter])]
+
+
+def _envelope_surface(clip, parameter):
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    track = _EnvelopeTrack(clip, parameter)
+    surface._track = lambda song, index: track
+    surface._parameter = lambda song, t, d, p: (parameter, track.devices[0])
+    return surface, track
+
+
+def _dry_wet():
+    return types.SimpleNamespace(name="Dry Wet", min=0.0, max=1.0, is_enabled=True)
+
+
+def test_clip_envelope_writes_steps_and_reads_them_back():
+    clip = _EnvelopeClip()
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    result = surface._set_clip_envelope(
+        None,
+        {
+            "track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+            "steps": [
+                {"start": 0.0, "length": 64.0, "value": 0.30},
+                {"start": 320.0, "length": 64.0, "value": 1.00},
+            ],
+        },
+    )
+
+    assert result["step_count"] == 2
+    assert result["parameter"] == "Dry Wet"
+    # the write is verified by reading the envelope back, not assumed
+    assert [s["value_at_time"] for s in result["steps"]] == [0.30, 1.00]
+    assert result["verified_step_count"] == 2
+    assert all(step["matches"] for step in result["steps"])
+
+
+def test_clip_envelope_refuses_values_outside_the_parameter_range():
+    clip = _EnvelopeClip()
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 1.5}]},
+        )
+    except ValueError as exc:
+        assert "out of range" in str(exc)
+    else:
+        raise AssertionError("an out-of-range value must be refused")
+
+    # nothing was written, not even the valid steps of a partially bad batch
+    assert clip.envelopes == {}
+
+
+def test_clip_envelope_says_so_when_live_refuses_an_arrangement_clip():
+    """Live documents automation_envelope as returning None for Arrangement clips."""
+    clip = _EnvelopeClip(arrangement=True)
+    parameter = _dry_wet()
+    surface, _track = _envelope_surface(clip, parameter)
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 0.5}]},
+        )
+    except ValueError as exc:
+        assert "Session clips only" in str(exc)
+    else:
+        raise AssertionError("an Arrangement clip must be reported, not silently skipped")
+
+
+def test_clip_envelope_refuses_an_empty_slot():
+    parameter = _dry_wet()
+    surface, track = _envelope_surface(None, parameter)
+    track.clip_slots = [_EnvelopeSlot(None)]
+
+    try:
+        surface._set_clip_envelope(
+            None,
+            {"track_index": 3, "clip_index": 0, "device_index": 1, "parameter_index": 52,
+             "steps": [{"start": 0.0, "length": 4.0, "value": 0.5}]},
+        )
+    except ValueError as exc:
+        assert "empty" in str(exc)
+    else:
+        raise AssertionError("an empty clip slot must be refused")

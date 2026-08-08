@@ -208,8 +208,10 @@ Script. New tools must uphold them:
 - Native-instrument insertion is limited to an **allowlist** (`ALLOWED_NATIVE_INSTRUMENTS` in the
   Remote Script), one track per call, and refuses tracks that already have an instrument.
 - Browser-preset loading (`load_browser_preset` → `load_preset`) is kept **strictly additive**: it
-  loads one browsed item onto one track and refuses tracks that already contain an instrument, so a
-  load can never replace an existing device. Browsing (`browse_device_presets`) stays read-only.
+  loads one browsed item onto one track. It refuses an *instrument* preset when the track already
+  has an instrument, so a load can never replace one; `audio_effects` and `midi_effects` are allowed
+  there, because an effect cannot replace an instrument and putting a delay after a synth is
+  ordinary signal-chain work. Browsing (`browse_device_presets`) stays read-only.
 - Arrangement-locator placement is **additive**: it skips any position that already has a cue
   (never toggles/deletes one) and restores the transport afterward. Live exposes no way to create a
   cue at a given time — only `set_or_delete_cue()`, a **toggle at the playhead** — and `CuePoint.time`
@@ -222,6 +224,16 @@ Script. New tools must uphold them:
   refuses unless the transport actually arrived; that refusal is what keeps a toggle from deleting
   someone else's locator. Both `create_arrangement_locators_from_structure` (audio-detected) and
   `create_arrangement_locators_from_sections` (explicit, tempo-free) go through this path.
+- Clip envelopes (`set_clip_parameter_envelope` → `set_clip_envelope`) are a **Session-clip**
+  feature: Live documents `automation_envelope` as returning None for Arrangement clips, and it
+  exposes no API for writing Arrangement automation lanes at all. An envelope written on a Session
+  clip *does* travel with the clip into the Arrangement, so the order is create the clip in a
+  Session slot → write the envelope → `copy_session_clip_to_arrangement`. Writing after the copy
+  silently automates nothing, so the command refuses an Arrangement clip instead. Values are
+  range-checked against the parameter before anything is written (no partial batch), and the result
+  reports `value_at_time` sampled at the **middle** of each step: `value_at_time` is
+  left-continuous, so sampling exactly on a step boundary returns the step that *ends* there and
+  makes a correct write look like an off-by-one failure.
 - `get_transport_state` is read-only and is the way to check any of the above: transport position,
   `start_time`, `song_length`, loop, and the existing cue list.
 - Device parameter changes are range-checked; Live-disabled or macro-controlled parameters are

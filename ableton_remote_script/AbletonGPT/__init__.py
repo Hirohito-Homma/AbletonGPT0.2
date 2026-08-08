@@ -219,6 +219,8 @@ class AbletonGPTControlSurface(ControlSurface):
                     for i, track in enumerate(song.tracks)
                 ],
             }
+        if command == "set_clip_envelope":
+            return self._set_clip_envelope(song, params)
         if command == "get_transport_state":
             return self._get_transport_state(song)
         if command == "jump_transport":
@@ -1131,6 +1133,11 @@ class AbletonGPTControlSurface(ControlSurface):
 
     #: Top-level Live browser roots we allow enumerating. Each name is a BrowserItem
     #: attribute on ``Application.browser``. Read-only browsing only -- never loads.
+    # Categories that cannot possibly contain an instrument. Loading one of these
+    # onto a track that already has an instrument is additive by construction, so
+    # the "never replace an instrument" guard does not apply to them.
+    EFFECT_ONLY_CATEGORIES = ("audio_effects", "midi_effects")
+
     BROWSER_CATEGORIES = (
         "instruments",
         "sounds",
@@ -1207,12 +1214,19 @@ class AbletonGPTControlSurface(ControlSurface):
         if not getattr(target, "is_loadable", False):
             raise ValueError("browser item is not loadable: %s" % name)
 
-        # Safety: never load onto a track that already has an instrument. Loading an
-        # instrument preset there could replace the existing one (a destructive change);
-        # refusing keeps every load strictly additive, mirroring add_native_device.
-        if any(self._is_instrument(device) for device in track.devices):
+        # Safety: never let a load replace an existing instrument. An instrument
+        # preset dropped on a track that already has one would do exactly that, so
+        # those stay refused. Effect categories cannot contain an instrument, so
+        # loading one is additive by construction -- refusing them too (as this
+        # once did) made it impossible to put a delay after a synth, which is
+        # ordinary signal-chain work and destroys nothing.
+        if category not in self.EFFECT_ONLY_CATEGORIES and any(
+            self._is_instrument(device) for device in track.devices
+        ):
             raise ValueError(
-                "target track already contains an instrument; refusing to load onto it"
+                "target track already contains an instrument; refusing to load a "
+                "'%s' item onto it (audio_effects and midi_effects are allowed)"
+                % category
             )
 
         before_count = len(track.devices)
@@ -1339,6 +1353,105 @@ class AbletonGPTControlSurface(ControlSurface):
             "created": True,
             "time": float(new_cue.time) if new_cue is not None else expected,
             "name": name,
+        }
+
+    MAX_ENVELOPE_STEPS = 512
+
+    def _set_clip_envelope(self, song, params):
+        """Write a step envelope for one device parameter onto a **Session** clip.
+
+        Clip envelopes are a Session-clip feature: Live documents
+        ``automation_envelope`` as "Returns None for Arrangement clips", and there
+        is no Live API for writing Arrangement automation lanes. So this refuses
+        anything but a Session clip slot rather than silently writing nothing.
+
+        Steps are ``{start, length, value}`` in the clip's own beat time. Values
+        are range-checked against the parameter before anything is written, and
+        the result reports ``value_at_time`` read back at each step start so the
+        caller can confirm the write landed instead of assuming it.
+        """
+        track = self._track(song, params["track_index"])
+        clip_index = int(params["clip_index"])
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("clip slot is empty")
+        clip = slot.clip
+
+        parameter, device = self._parameter(
+            song, params["track_index"], params["device_index"], params["parameter_index"]
+        )
+        if not parameter.is_enabled:
+            raise ValueError("parameter is currently locked or macro-controlled")
+
+        steps = params.get("steps", [])
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("steps must be a non-empty list")
+        if len(steps) > self.MAX_ENVELOPE_STEPS:
+            raise ValueError("too many steps (max %d per call)" % self.MAX_ENVELOPE_STEPS)
+
+        minimum = float(parameter.min)
+        maximum = float(parameter.max)
+        prepared = []
+        for step in steps:
+            start = float(step["start"])
+            length = float(step["length"])
+            value = float(step["value"])
+            if start < 0:
+                raise ValueError("step start must be non-negative")
+            if length <= 0:
+                raise ValueError("step length must be positive")
+            if value < minimum or value > maximum:
+                raise ValueError("step value out of range for this parameter")
+            prepared.append((start, length, value))
+
+        envelope = clip.automation_envelope(parameter)
+        if envelope is None:
+            envelope = clip.create_automation_envelope(parameter)
+        if envelope is None:
+            raise ValueError(
+                "Live did not provide an envelope for this parameter "
+                "(clip envelopes exist on Session clips only)"
+            )
+
+        for start, length, value in prepared:
+            envelope.insert_step(start, length, value)
+
+        # Verify in the MIDDLE of each step, not at its start: value_at_time is
+        # left-continuous, so sampling exactly on a boundary returns the value of
+        # the step that *ends* there. Reading at the boundary made a correct write
+        # look like an off-by-one failure. The boundary sample is kept alongside
+        # because it is what a caller sees when steps abut.
+        written = []
+        for start, length, value in prepared:
+            def sample(time):
+                try:
+                    return float(envelope.value_at_time(time))
+                except Exception:
+                    return None
+
+            middle = sample(start + length / 2.0)
+            written.append(
+                {
+                    "start": start,
+                    "length": length,
+                    "requested": value,
+                    "value_at_time": middle,
+                    "value_at_step_start": sample(start),
+                    "matches": middle is not None and abs(middle - value) < 1e-3,
+                }
+            )
+        return {
+            "track": track.name,
+            "clip": clip.name,
+            "device": device.name,
+            "parameter": parameter.name,
+            "parameter_min": minimum,
+            "parameter_max": maximum,
+            "step_count": len(written),
+            "verified_step_count": sum(1 for step in written if step["matches"]),
+            "steps": written,
         }
 
     def _get_transport_state(self, song):
