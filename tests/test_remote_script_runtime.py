@@ -464,3 +464,130 @@ def test_dispatch_releases_client_when_main_thread_never_runs():
     # The main thread finishing late must not send a second, conflicting reply.
     pending[0]()
     assert len(sent) == 1
+
+
+class _Cue:
+    def __init__(self, time, name=""):
+        self.time = time
+        self.name = name
+
+
+class _LocatorSong:
+    """A Song modelling how Live actually moves the Arrangement transport.
+
+    ``set_or_delete_cue`` acts on ``current_song_time``. Assigning to that
+    property does not move the transport (measured against Live 12.4), and
+    assigning to ``start_time`` moves the start marker instead. ``jump_by`` is
+    the documented way to set a new playing position relative to the current
+    one. ``transport_is_stuck`` models the failure this guards against.
+    """
+
+    def __init__(self, transport_is_stuck=False, start=0.0):
+        self._time = start
+        self.start_time = start
+        self.transport_is_stuck = transport_is_stuck
+        self.cue_points = []
+        self.toggle_calls = 0
+        self.jumps = []
+        self.is_playing = False
+        self.tempo = 120.0
+
+    @property
+    def current_song_time(self):
+        return self._time
+
+    @current_song_time.setter
+    def current_song_time(self, value):
+        # Live ignores this here; the tests must not depend on it working.
+        pass
+
+    def jump_by(self, delta):
+        self.jumps.append(delta)
+        if not self.transport_is_stuck:
+            self._time = self._time + float(delta)
+
+    def set_or_delete_cue(self):
+        self.toggle_calls += 1
+        for cue in list(self.cue_points):
+            if abs(cue.time - self._time) <= 1e-4:
+                self.cue_points.remove(cue)
+                return
+        self.cue_points.append(_Cue(self._time))
+
+
+def _locator_surface():
+    module = _load_remote_script()
+    return module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+
+
+def test_add_locators_places_cues_at_the_requested_beats():
+    surface = _locator_surface()
+    song = _LocatorSong(start=512.0)
+
+    result = surface._add_locators(
+        song, [{"time": 0.0, "name": "intro"}, {"time": 64.0, "name": "drop"}]
+    )
+
+    assert result["created_count"] == 2
+    assert sorted(cue.time for cue in song.cue_points) == [0.0, 64.0]
+    assert [cue.name for cue in song.cue_points] == ["intro", "drop"]
+    # the transport is put back where it was found
+    assert song.current_song_time == 512.0
+
+
+def test_add_locators_never_deletes_when_the_playhead_is_stuck():
+    """The guard that keeps a broken playhead from toggling cues off.
+
+    Without it, every call lands on whatever position the transport is parked
+    at: the first creates a cue there, the second deletes it again.
+    """
+    surface = _locator_surface()
+    song = _LocatorSong(transport_is_stuck=True, start=512.0)
+    existing = _Cue(512.0, "someone else's locator")
+    song.cue_points.append(existing)
+
+    result = surface._add_locators(
+        song, [{"time": 0.0, "name": "intro"}, {"time": 64.0, "name": "drop"}]
+    )
+
+    assert result["created_count"] == 0
+    assert result["skipped_count"] == 2
+    assert all("transport stayed at" in item["reason"] for item in result["skipped"])
+    # nothing was toggled, so the pre-existing locator survives untouched
+    assert song.toggle_calls == 0
+    assert song.cue_points == [existing]
+
+
+def test_transport_state_reports_positions_and_cues_without_changing_them():
+    surface = _locator_surface()
+    song = _LocatorSong(start=512.0)
+    song.cue_points.append(_Cue(64.0, "2 drop"))
+    song.cue_points.append(_Cue(0.0, "1 intro"))
+    state = surface._get_transport_state(song)
+
+    assert state["current_song_time"] == 512.0
+    assert state["read_only"] is True
+    # cues come back sorted by time so a caller can compare against a plan
+    assert [cue["time"] for cue in state["cue_points"]] == [0.0, 64.0]
+    assert [cue["name"] for cue in state["cue_points"]] == ["1 intro", "2 drop"]
+    assert state["cue_count"] == 2
+    # nothing was touched
+    assert song.toggle_calls == 0
+    assert song.jumps == []
+    assert song.current_song_time == 512.0
+
+
+def test_transport_state_tolerates_properties_a_live_version_lacks():
+    surface = _locator_surface()
+
+    class _Minimal(_LocatorSong):
+        @property
+        def song_length(self):
+            raise AttributeError("not in this Live version")
+
+    song = _Minimal(start=8.0)
+
+    state = surface._get_transport_state(song)
+
+    assert state["song_length"] is None
+    assert state["current_song_time"] == 8.0

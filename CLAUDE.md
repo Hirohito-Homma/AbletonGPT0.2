@@ -210,15 +210,29 @@ Script. New tools must uphold them:
 - Browser-preset loading (`load_browser_preset` → `load_preset`) is kept **strictly additive**: it
   loads one browsed item onto one track and refuses tracks that already contain an instrument, so a
   load can never replace an existing device. Browsing (`browse_device_presets`) stays read-only.
-- Arrangement-locator placement (`create_arrangement_locators_from_structure` → `add_locators`) is
-  **additive**: it skips any position that already has a cue (never toggles/deletes one) and
-  restores the playhead afterward. It uses `set_or_delete_cue`, so the no-cue-at-position guard is
-  what keeps it from deleting.
+- Arrangement-locator placement is **additive**: it skips any position that already has a cue
+  (never toggles/deletes one) and restores the transport afterward. Live exposes no way to create a
+  cue at a given time — only `set_or_delete_cue()`, a **toggle at the playhead** — and `CuePoint.time`
+  is read-only, so a cue cannot be moved after the fact. Placement therefore has to move the
+  transport first, and **Live applies a transport move on a later tick**: reading `current_song_time`
+  back inside the same command still returns the old position, which used to put every locator
+  wherever the transport was parked and delete existing ones on repeat. So the server drives three
+  separate bridge calls per locator — `jump_transport` → `get_transport_state` →
+  `toggle_cue_at_playhead` — because one bridge call is one Live tick. `toggle_cue_at_playhead`
+  refuses unless the transport actually arrived; that refusal is what keeps a toggle from deleting
+  someone else's locator. Both `create_arrangement_locators_from_structure` (audio-detected) and
+  `create_arrangement_locators_from_sections` (explicit, tempo-free) go through this path.
+- `get_transport_state` is read-only and is the way to check any of the above: transport position,
+  `start_time`, `song_length`, loop, and the existing cue list.
 - Device parameter changes are range-checked; Live-disabled or macro-controlled parameters are
   rejected. Always `get_track_devices` first — parameter indices/values are device-specific.
 
 ## Testing note
 
-The only test file is `tests/test_bridge.py`. `scripts/run_checks.py` deliberately runs it without
-pytest so contributors without dev deps can still validate; if you add test files, wire them into
-that script too, or they won't run in the no-pytest path.
+`uv run pytest` runs the whole suite (72 files, ~674 tests). `scripts/run_checks.py` is a separate,
+deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
+`tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
+smoke test of every module. Its printed total adds a hardcoded `+ 49` for those import checks, so
+**when you add a module, add it to that list and bump the constant**. Most new test files belong in
+the pytest suite only; wire one into `run_checks.py` just when its checks must survive without dev
+deps.

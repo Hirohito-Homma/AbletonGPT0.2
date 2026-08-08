@@ -219,6 +219,12 @@ class AbletonGPTControlSurface(ControlSurface):
                     for i, track in enumerate(song.tracks)
                 ],
             }
+        if command == "get_transport_state":
+            return self._get_transport_state(song)
+        if command == "jump_transport":
+            return self._jump_transport(song, params)
+        if command == "toggle_cue_at_playhead":
+            return self._toggle_cue_at_playhead(song, params)
         if command == "get_mix_snapshot":
             return {
                 "tracks": [self._mix_state(index, track) for index, track in enumerate(song.tracks)],
@@ -1267,6 +1273,115 @@ class AbletonGPTControlSurface(ControlSurface):
             "read_only": True,
         }
 
+    def _jump_transport(self, song, params):
+        """Move the Arrangement transport to ``time``.
+
+        Live applies a transport move on a LATER tick: reading
+        ``current_song_time`` back inside this same command still returns the old
+        position (measured on Live 12.4). Callers must therefore observe the
+        result with a *separate* command -- see ``_toggle_cue_at_playhead``.
+        """
+        time = float(params["time"])
+        if time < 0:
+            raise ValueError("transport time must be non-negative")
+        before = float(song.current_song_time)
+        delta = time - before
+        if abs(delta) > 1e-9:
+            song.jump_by(delta)
+        return {
+            "requested": time,
+            "before": before,
+            "note": "Live applies the move on a later tick; confirm with get_transport_state",
+        }
+
+    def _toggle_cue_at_playhead(self, song, params):
+        """Create a cue at the CURRENT playhead, or refuse. Never moves the transport.
+
+        ``set_or_delete_cue`` is a toggle and is the only way Live exposes cue
+        creation, so calling it from the wrong position deletes an existing
+        locator instead of adding one. This refuses unless the transport is
+        already where the caller expects, which is why moving is a separate
+        command run on an earlier tick.
+        """
+        expected = float(params["expected_time"])
+        name = str(params.get("name", ""))[:100]
+        epsilon = 1e-4
+
+        actual = float(song.current_song_time)
+        if abs(actual - expected) > epsilon:
+            return {
+                "created": False,
+                "time": actual,
+                "reason": "transport is at %g, expected %g" % (actual, expected),
+            }
+
+        before_times = [float(cue.time) for cue in song.cue_points]
+        if any(abs(existing - expected) <= epsilon for existing in before_times):
+            return {"created": False, "time": expected, "reason": "cue already exists"}
+
+        song.set_or_delete_cue()
+        after = list(song.cue_points)
+        if len(after) != len(before_times) + 1:
+            return {"created": False, "time": expected, "reason": "cue was not created"}
+
+        new_cue = None
+        for cue in after:
+            cue_time = float(cue.time)
+            if all(abs(cue_time - old) > epsilon for old in before_times):
+                new_cue = cue
+                break
+        if new_cue is not None and name:
+            try:
+                new_cue.name = name
+            except Exception:
+                pass
+        return {
+            "created": True,
+            "time": float(new_cue.time) if new_cue is not None else expected,
+            "name": name,
+        }
+
+    def _get_transport_state(self, song):
+        """Read-only snapshot of the Arrangement transport and its locators.
+
+        Diagnostic. Changes nothing: no property is written and no cue is
+        touched. Locator placement has to move the transport and then toggle a
+        cue at it, so when that misbehaves this is what tells you which of
+        ``current_song_time`` / ``start_time`` actually moved, whether a loop or
+        the song length is constraining it, and what cues already exist.
+        """
+        cues = []
+        for cue in song.cue_points:
+            try:
+                cue_name = str(cue.name)
+            except Exception:
+                cue_name = ""
+            cues.append({"time": float(cue.time), "name": cue_name})
+        cues.sort(key=lambda item: item["time"])
+
+        state = {
+            "current_song_time": float(song.current_song_time),
+            "is_playing": bool(song.is_playing),
+            "tempo": float(song.tempo),
+            "cue_points": cues,
+            "cue_count": len(cues),
+            "read_only": True,
+        }
+        # These are not present on every Live version; report null rather than failing.
+        for name, cast in (
+            ("start_time", float),
+            ("song_length", float),
+            ("loop", bool),
+            ("loop_start", float),
+            ("loop_length", float),
+            ("back_to_arranger", bool),
+        ):
+            try:
+                state[name] = cast(getattr(song, name))
+            except Exception:
+                state[name] = None
+        return state
+
     def _add_locators(self, song, locators):
         """Add named Arrangement locators (cue points) at the given beat positions.
 
@@ -1280,6 +1395,8 @@ class AbletonGPTControlSurface(ControlSurface):
             raise ValueError("too many locators (max 256 per call)")
 
         epsilon = 1e-4
+        # Restore both: the stopped playhead is start_time, the playing one is
+        # current_song_time, and this must not leave the transport moved.
         original_time = song.current_song_time
         created = []
         skipped = []
@@ -1295,7 +1412,30 @@ class AbletonGPTControlSurface(ControlSurface):
                     skipped.append({"time": time, "name": name, "reason": "cue already exists"})
                     continue
 
-                song.current_song_time = time
+                # set_or_delete_cue() acts on `current_song_time`. Assigning to
+                # that property does not move the transport here -- cues kept
+                # landing wherever it was parked -- and assigning to `start_time`
+                # moves the start marker instead: it read back correctly while
+                # the cue still appeared at the old position. jump_by is Live's
+                # documented way to "set a new playing pos, relative to the
+                # current one", so move relatively and then verify.
+                delta = time - float(song.current_song_time)
+                if abs(delta) > epsilon:
+                    song.jump_by(delta)
+
+                # TOGGLE GUARD: set_or_delete_cue() deletes when a cue already
+                # sits at the playhead, so calling it from the wrong position
+                # would silently remove someone else's locator. Never toggle
+                # unless the transport actually arrived.
+                actual_playhead = float(song.current_song_time)
+                if abs(actual_playhead - time) > epsilon:
+                    skipped.append({
+                        "time": time,
+                        "name": name,
+                        "reason": "transport stayed at %g instead of %g; refusing to "
+                        "toggle a cue from the wrong position" % (actual_playhead, time),
+                    })
+                    continue
                 song.set_or_delete_cue()
                 after = list(song.cue_points)
                 if len(after) != len(before_times) + 1:
@@ -1316,7 +1456,9 @@ class AbletonGPTControlSurface(ControlSurface):
                         pass
                 created.append({"time": actual_time, "name": name})
         finally:
-            song.current_song_time = original_time
+            restore_delta = original_time - float(song.current_song_time)
+            if abs(restore_delta) > epsilon:
+                song.jump_by(restore_delta)
 
         return {
             "created": created,
