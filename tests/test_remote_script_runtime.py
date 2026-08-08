@@ -591,3 +591,100 @@ def test_transport_state_tolerates_properties_a_live_version_lacks():
 
     assert state["song_length"] is None
     assert state["current_song_time"] == 8.0
+
+
+class _BrowserItem:
+    def __init__(self, name, is_folder=False, is_loadable=True):
+        self.name = name
+        self.is_folder = is_folder
+        self.is_loadable = is_loadable
+        self.children = []
+
+
+class _PresetTrack:
+    def __init__(self, devices):
+        self.name = "Chords"
+        self.devices = list(devices)
+
+
+class _PresetSurface:
+    """Just enough surface to exercise _load_preset's guard."""
+
+    def __init__(self, module, track, item):
+        self._module = module
+        self._track = track
+        self._item = item
+        self.loaded = []
+        self.BROWSER_CATEGORIES = module.AbletonGPTControlSurface.BROWSER_CATEGORIES
+        self.EFFECT_ONLY_CATEGORIES = module.AbletonGPTControlSurface.EFFECT_ONLY_CATEGORIES
+
+    _is_instrument = staticmethod(
+        lambda device: int(device.type) == 1
+    )
+
+    def _track_lookup(self, song, index):
+        return self._track
+
+    def _resolve_browser_node(self, category, path):
+        node = _BrowserItem("root", is_folder=True)
+        node.children = [self._item]
+        return node
+
+    def application(self):
+        surface = self
+
+        class _Browser:
+            def load_item(self, item):
+                surface.loaded.append(item.name)
+                surface._track.devices.append(types.SimpleNamespace(type=2, name=item.name))
+
+        return types.SimpleNamespace(browser=_Browser())
+
+
+def _preset_surface(devices, item_name="Delay", category_item=None):
+    module = _load_remote_script()
+    track = _PresetTrack(devices)
+    item = category_item or _BrowserItem(item_name)
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    helper = _PresetSurface(module, track, item)
+    surface._resolve_browser_node = helper._resolve_browser_node
+    surface.application = helper.application
+    surface._track = lambda song, index: track
+    song = types.SimpleNamespace(view=types.SimpleNamespace(selected_track=None))
+    return surface, track, helper, song
+
+
+def test_an_effect_may_be_loaded_onto_a_track_that_already_has_an_instrument():
+    """A delay after a synth is ordinary signal-chain work and replaces nothing."""
+    instrument = types.SimpleNamespace(type=1, name="Wavetable")
+    surface, track, helper, song = _preset_surface([instrument])
+
+    result = surface._load_preset(song, 0, "audio_effects", [], "Delay")
+
+    assert helper.loaded == ["Delay"]
+    assert result["added_device_count"] == 1
+    # the instrument is still there, first in the chain
+    assert track.devices[0] is instrument
+
+
+def test_an_instrument_preset_is_still_refused_on_a_track_that_has_one():
+    instrument = types.SimpleNamespace(type=1, name="Wavetable")
+    surface, track, helper, song = _preset_surface([instrument], item_name="Operator")
+
+    try:
+        surface._load_preset(song, 0, "instruments", [], "Operator")
+    except ValueError as exc:
+        assert "already contains an instrument" in str(exc)
+    else:
+        raise AssertionError("loading an instrument over an instrument must be refused")
+
+    assert helper.loaded == []
+    assert track.devices == [instrument]
+
+
+def test_an_instrument_still_loads_onto_an_empty_track():
+    surface, track, helper, song = _preset_surface([], item_name="Operator")
+
+    surface._load_preset(song, 0, "instruments", [], "Operator")
+
+    assert helper.loaded == ["Operator"]

@@ -1131,6 +1131,11 @@ class AbletonGPTControlSurface(ControlSurface):
 
     #: Top-level Live browser roots we allow enumerating. Each name is a BrowserItem
     #: attribute on ``Application.browser``. Read-only browsing only -- never loads.
+    # Categories that cannot possibly contain an instrument. Loading one of these
+    # onto a track that already has an instrument is additive by construction, so
+    # the "never replace an instrument" guard does not apply to them.
+    EFFECT_ONLY_CATEGORIES = ("audio_effects", "midi_effects")
+
     BROWSER_CATEGORIES = (
         "instruments",
         "sounds",
@@ -1207,12 +1212,19 @@ class AbletonGPTControlSurface(ControlSurface):
         if not getattr(target, "is_loadable", False):
             raise ValueError("browser item is not loadable: %s" % name)
 
-        # Safety: never load onto a track that already has an instrument. Loading an
-        # instrument preset there could replace the existing one (a destructive change);
-        # refusing keeps every load strictly additive, mirroring add_native_device.
-        if any(self._is_instrument(device) for device in track.devices):
+        # Safety: never let a load replace an existing instrument. An instrument
+        # preset dropped on a track that already has one would do exactly that, so
+        # those stay refused. Effect categories cannot contain an instrument, so
+        # loading one is additive by construction -- refusing them too (as this
+        # once did) made it impossible to put a delay after a synth, which is
+        # ordinary signal-chain work and destroys nothing.
+        if category not in self.EFFECT_ONLY_CATEGORIES and any(
+            self._is_instrument(device) for device in track.devices
+        ):
             raise ValueError(
-                "target track already contains an instrument; refusing to load onto it"
+                "target track already contains an instrument; refusing to load a "
+                "'%s' item onto it (audio_effects and midi_effects are allowed)"
+                % category
             )
 
         before_count = len(track.devices)

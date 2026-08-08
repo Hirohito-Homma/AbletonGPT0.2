@@ -208,8 +208,10 @@ Script. New tools must uphold them:
 - Native-instrument insertion is limited to an **allowlist** (`ALLOWED_NATIVE_INSTRUMENTS` in the
   Remote Script), one track per call, and refuses tracks that already have an instrument.
 - Browser-preset loading (`load_browser_preset` → `load_preset`) is kept **strictly additive**: it
-  loads one browsed item onto one track and refuses tracks that already contain an instrument, so a
-  load can never replace an existing device. Browsing (`browse_device_presets`) stays read-only.
+  loads one browsed item onto one track. It refuses an *instrument* preset when the track already
+  has an instrument, so a load can never replace one; `audio_effects` and `midi_effects` are allowed
+  there, because an effect cannot replace an instrument and putting a delay after a synth is
+  ordinary signal-chain work. Browsing (`browse_device_presets`) stays read-only.
 - Arrangement-locator placement is **additive**: it skips any position that already has a cue
   (never toggles/deletes one) and restores the transport afterward. Live exposes no way to create a
   cue at a given time — only `set_or_delete_cue()`, a **toggle at the playhead** — and `CuePoint.time`
