@@ -162,6 +162,18 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   a section carries and *what change* it deserves, so the same material can be developed with intent
   rather than repeated verbatim. Reuses `layering.section_archetype`. Read-only plan
   (`plan_narrative_arc`); a create/apply tool consumes the directives. Pure, stdlib-only.
+- **`develop.py`** — `build_developed_arrangement(clip_data, structure, section_repeats, seed)`
+  develops one MIDI loop into a *narrative* arrangement. Where `phrase.py` tiles a loop verbatim,
+  this reads the narrative arc (`narrative.build_narrative_arc`) and rebuilds the loop **differently
+  in every section** per that section's directives: density (thin the intro / fill the chorus),
+  register (octave-double the chorus top / drop the breakdown's low voices), velocity (toward the
+  section's target with a crescendo/pull-back shape), `vary` (deterministically thin a returning
+  section so it differs), and a motion fill into the next section. The transformed sections are
+  concatenated into one long clip, so a single loop becomes a full arrangement with a rise, a peak
+  and a release. Note count/length grow, so this is a plan/**create** (not in-place): the
+  `plan_/create_developed_arrangement` pair writes into an empty slot via the non-overwriting
+  `create_midi_clip` with a source-fingerprint guard. Deterministic (same loop + structure + seed →
+  same arrangement). Pure, stdlib-only.
 - **`timescale.py`** — `build_timescale_plan` scales every note's start/duration and the clip
   length by a factor: 2.0 = half-time (slower/longer), 0.5 = double-time (faster/shorter);
   `factor_for` maps the `"half"`/`"double"` modes. Pitch/velocity/probability and the note count
