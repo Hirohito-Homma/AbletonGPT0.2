@@ -1,8 +1,9 @@
 """Pure adapter from a KIHACHI arrangement plan to an AbletonGPT job plan.
 
 The adapter is intentionally narrow. It accepts the existing tempo command and the
-four additive core operations needed for a MIDI arrangement with send throws. Any
-other operation rejects the *whole* document before a real bridge can be opened.
+five additive core operations needed for a native-instrument-ready MIDI
+arrangement with send throws. Any other operation rejects the *whole* document
+before a real bridge can be opened.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ KIHACHI_CORE_COMMANDS = frozenset(
     {
         "set_tempo",
         "create_track",
+        "apply_live_instrument_selection",
         "create_midi_clip",
         "set_clip_send_envelope",
         "copy_session_clip_to_arrangement",
@@ -35,8 +37,21 @@ class _ValidationBridge:
 
     def __init__(self) -> None:
         self._clips: dict[tuple[int, int], dict[str, Any]] = {}
+        self._devices: dict[int, list[dict[str, Any]]] = {}
 
     def call(self, command: str, **params: Any) -> dict[str, Any]:
+        if command == "get_track_devices":
+            return {"devices": list(self._devices.get(params["track_index"], []))}
+        if command == "insert_first_available_instrument":
+            candidate = params["candidates"][0]
+            device = {
+                "name": candidate,
+                "class_name": candidate,
+                "class_display_name": candidate,
+                "type": 1,
+            }
+            self._devices.setdefault(params["track_index"], []).append(device)
+            return {"name": candidate}
         if command == "create_midi_clip":
             self._clips[(params["track_index"], params["clip_index"])] = {
                 "clip": params["name"],

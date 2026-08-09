@@ -24,8 +24,13 @@ command; removing a return is a manual action in Live.
 
 KIHACHI plans enter through `jobs import-kihachi`, which is a pure preflight: it
 accepts plan version 0.1, `planned_not_applied`, the existing `set_tempo`, and only
-the four additive core operations (`create_track`, `create_midi_clip`,
-`set_clip_send_envelope`, `copy_session_clip_to_arrangement`). The resulting saved
+the five additive core operations (`create_track`, `apply_live_instrument_selection`,
+`create_midi_clip`, `set_clip_send_envelope`, `copy_session_clip_to_arrangement`).
+Instrument selection accepts a semantic role/genre/mood, then AbletonGPT owns the
+native-device candidates and sends `insert_first_available_instrument` to Live.
+Resume accepts one candidate-matching instrument; a different existing instrument
+is never replaced. Drums stay outside this operation until an actual kit preset is
+resolved, because an empty Drum Rack or Impulse is silent. The resulting saved
 JobPlan remains pending until a separate `jobs run`/`resume`; unknown operations or
 bad parameters reject the whole import before any Live bridge call.
 
@@ -288,7 +293,7 @@ Script. New tools must uphold them:
 
 ## Testing note
 
-`uv run pytest` runs the whole suite (72 files, ~674 tests). `scripts/run_checks.py` is a separate,
+`uv run pytest` runs the whole suite (72 files, ~733 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
 smoke test of every module. Its printed total adds a hardcoded `+ 51` for those import checks, so

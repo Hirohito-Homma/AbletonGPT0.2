@@ -21,7 +21,14 @@ class FakeBridge:
     command mapping in isolation. Set ``raise_on`` to simulate a bridge failure.
     """
 
-    def __init__(self, *, tempo: float = 124.0, is_playing: bool = False, tracks=None):
+    def __init__(
+        self,
+        *,
+        tempo: float = 124.0,
+        is_playing: bool = False,
+        tracks=None,
+        devices=None,
+    ):
         self._tempo = tempo
         self._is_playing = is_playing
         self._tracks = tracks if tracks is not None else [{"index": 0, "name": "Track 1"}]
@@ -29,6 +36,8 @@ class FakeBridge:
         self.raise_on: str | None = None
         self.create_error: Exception | None = None
         self.existing_clip: dict | None = None
+        self.devices = list(devices or [])
+        self.instrument_error: Exception | None = None
 
     def call(self, command: str, **params):
         self.calls.append((command, params))
@@ -46,6 +55,21 @@ class FakeBridge:
                 "tempo": self._tempo,
                 "tracks": self._tracks,
             }
+        if command == "get_track_devices":
+            return {"track_index": params["track_index"], "devices": list(self.devices)}
+        if command == "insert_first_available_instrument":
+            candidate = params["candidates"][0]
+            self.devices.append(
+                {
+                    "name": candidate,
+                    "class_name": candidate,
+                    "class_display_name": candidate,
+                    "type": 1,
+                }
+            )
+            if self.instrument_error is not None:
+                raise self.instrument_error
+            return {"name": candidate}
         if command == "create_midi_clip" and self.create_error is not None:
             raise self.create_error
         if command == "create_midi_clip":
@@ -80,6 +104,7 @@ def test_executor_satisfies_step_executor_protocol():
         "is_playing",
         "get_tracks",
         "create_track",
+        "apply_live_instrument_selection",
         "create_midi_clip",
         "set_clip_send_envelope",
         "copy_session_clip_to_arrangement",
@@ -212,10 +237,129 @@ def test_kihachi_core_operations_map_to_the_existing_bridge_protocol():
     ]
 
 
+def test_instrument_selection_resolves_the_role_and_verifies_readback():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert [command for command, _params in bridge.calls] == [
+        "get_track_devices",
+        "insert_first_available_instrument",
+        "get_track_devices",
+    ]
+    insert = bridge.calls[1][1]
+    assert insert["track_index"] == 2
+    assert insert["candidates"][0] == "Operator"
+    assert insert["index"] == -1
+
+
+def test_instrument_selection_resume_accepts_one_matching_instrument():
+    bridge = FakeBridge(
+        devices=[
+            {
+                "name": "Operator",
+                "class_name": "Operator",
+                "class_display_name": "Operator",
+                "type": 1,
+            }
+        ]
+    )
+
+    AbletonStepExecutor(bridge).execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert bridge.calls == [("get_track_devices", {"track_index": 2})]
+
+
+def test_instrument_selection_refuses_to_replace_a_different_instrument():
+    bridge = FakeBridge(
+        devices=[
+            {
+                "name": "Electric",
+                "class_name": "Electric",
+                "class_display_name": "Electric",
+                "type": 1,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="different instrument"):
+        AbletonStepExecutor(bridge).execute(
+            JobStep(
+                "instrument",
+                "apply_live_instrument_selection",
+                {
+                    "track_index": 2,
+                    "role": "bass",
+                    "genre": "edm",
+                    "mood": "dark",
+                },
+            )
+        )
+
+    assert bridge.calls == [("get_track_devices", {"track_index": 2})]
+
+
+def test_instrument_selection_reconciles_an_ambiguous_success():
+    bridge = FakeBridge()
+    bridge.instrument_error = AbletonConnectionError("response timed out")
+
+    AbletonStepExecutor(bridge).execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert [command for command, _params in bridge.calls] == [
+        "get_track_devices",
+        "insert_first_available_instrument",
+        "get_track_devices",
+    ]
+
+
 @pytest.mark.parametrize(
     ("command", "params", "message"),
     [
         ("create_track", {"track_type": "return"}, "track_type"),
+        (
+            "apply_live_instrument_selection",
+            {
+                "track_index": 0,
+                "role": "guitar",
+                "genre": "edm",
+                "mood": "dark",
+            },
+            "unsupported instrument role",
+        ),
         (
             "create_midi_clip",
             {

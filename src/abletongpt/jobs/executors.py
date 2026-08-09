@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ..bridge import AbletonBridge, AbletonConnectionError
+from ..instruments import build_role_selection
 from .models import JobStep
 
 
@@ -116,6 +117,107 @@ def _create_track(bridge: SupportsBridgeCall, params: dict) -> Any:
     return bridge.call(
         "create_track", track_type=track_type, name=name, index=index
     )
+
+
+def _instrument_devices(
+    bridge: SupportsBridgeCall, track_index: int
+) -> list[Mapping[str, Any]]:
+    observed = bridge.call("get_track_devices", track_index=track_index)
+    devices = observed.get("devices", [])
+    if not isinstance(devices, list):
+        raise RuntimeError("get_track_devices returned an invalid device list")
+    return [
+        device
+        for device in devices
+        if isinstance(device, Mapping) and int(device.get("type", -1)) == 1
+    ]
+
+
+def _instrument_matches(
+    device: Mapping[str, Any], candidates: list[str]
+) -> bool:
+    names = {
+        str(device.get(field, "")).strip()
+        for field in ("name", "class_name", "class_display_name")
+    }
+    return any(candidate in names for candidate in candidates)
+
+
+def _has_one_matching_instrument(
+    devices: list[Mapping[str, Any]], candidates: list[str]
+) -> bool:
+    return len(devices) == 1 and _instrument_matches(devices[0], candidates)
+
+
+def _apply_live_instrument_selection(
+    bridge: SupportsBridgeCall, params: dict
+) -> Any:
+    """Resolve a semantic role to additive native-instrument candidates.
+
+    KIHACHI names the musical role, genre and mood; AbletonGPT owns Live's
+    device allowlist and fallback order. A matching instrument found during
+    resume is accepted, while any different existing instrument is left alone
+    and fails safely.
+    """
+
+    _exact_params(
+        params,
+        required=("track_index", "role", "genre", "mood"),
+        optional=("live_edition", "preferred_instrument", "index"),
+    )
+    track_index = _non_negative_index(params["track_index"], "track_index")
+    values: dict[str, str] = {}
+    for field in ("role", "genre", "mood"):
+        value = params[field]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("%s must be a non-empty string" % field)
+        values[field] = value.strip()
+    live_edition = params.get("live_edition", "unknown")
+    if not isinstance(live_edition, str) or not live_edition.strip():
+        raise ValueError("live_edition must be a non-empty string")
+    preferred = params.get("preferred_instrument", "")
+    if not isinstance(preferred, str):
+        raise ValueError("preferred_instrument must be a string")
+    index = params.get("index", -1)
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise ValueError("index must be an integer")
+    if index < -1:
+        raise ValueError("index must be -1 or non-negative")
+
+    selection = build_role_selection(
+        values["role"],
+        values["genre"],
+        values["mood"],
+        live_edition.strip(),
+        preferred.strip(),
+    )
+    candidates = list(selection["candidates"])
+    existing = _instrument_devices(bridge, track_index)
+    if existing:
+        if _has_one_matching_instrument(existing, candidates):
+            return None
+        raise ValueError(
+            "target track already contains a different instrument; refusing to replace it"
+        )
+
+    call_params = {
+        "track_index": track_index,
+        "candidates": candidates,
+        "index": index,
+    }
+    try:
+        result = bridge.call("insert_first_available_instrument", **call_params)
+    except (AbletonConnectionError, RuntimeError):
+        if _has_one_matching_instrument(
+            _instrument_devices(bridge, track_index), candidates
+        ):
+            return None
+        raise
+    if not _has_one_matching_instrument(
+        _instrument_devices(bridge, track_index), candidates
+    ):
+        raise RuntimeError("Live instrument readback does not match the selected candidates")
+    return result
 
 
 def _create_midi_clip(bridge: SupportsBridgeCall, params: dict) -> Any:
@@ -318,9 +420,10 @@ def _copy_session_clip_to_arrangement(
 class AbletonStepExecutor:
     """Connects a :class:`JobStep` to real Ableton operations via the bridge.
 
-    The allowlist covers transport/tempo/read commands plus the four additive
-    KIHACHI core operations: create a track, create a Session MIDI clip, write a
-    send envelope, then copy that clip to the Arrangement. Any other command fails
+    The allowlist covers transport/tempo/read commands plus the five additive
+    KIHACHI core operations: create a track, add a role-selected native
+    instrument, create a Session MIDI clip, write a send envelope, then copy that
+    clip to the Arrangement. Any other command fails
     safely as an :class:`UnsupportedStepCommand`. Bridge/connection errors are **not** swallowed;
     they propagate so :class:`~abletongpt.jobs.runner.JobRunner` records the step as
     FAILED with the error text. Satisfies the ``StepExecutor`` protocol.
@@ -335,6 +438,7 @@ class AbletonStepExecutor:
         "is_playing": _is_playing,
         "get_tracks": _get_tracks,
         "create_track": _create_track,
+        "apply_live_instrument_selection": _apply_live_instrument_selection,
         "create_midi_clip": _create_midi_clip,
         "set_clip_send_envelope": _set_clip_send_envelope,
         "copy_session_clip_to_arrangement": _copy_session_clip_to_arrangement,
