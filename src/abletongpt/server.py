@@ -1529,6 +1529,45 @@ def set_clip_parameter_envelope(
 
 
 @mcp.tool()
+def set_clip_send_envelope(
+    track_index: int,
+    clip_index: int,
+    send_index: int,
+    steps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """SessionクリップにSend量のステップEnvelopeを書き込む。ダブのディレイ・スロー用。
+
+    send_index=0がリターンA、1がB。stepsは{start,length,value}(クリップ内の拍)で、
+    値は0.0〜1.0。SendはミキサーにありデバイスチェーンではないのでデバイスEnvelope
+    (set_clip_parameter_envelope)では届かない。ArrangementへはSessionで書いてから
+    copy_session_clip_to_arrangementで運ぶこと。Remote Scriptバックエンド必須。
+    """
+    if min(track_index, clip_index, send_index) < 0:
+        raise ValueError("indices must be non-negative")
+    if not steps:
+        raise ValueError("steps must be a non-empty list")
+    if len(steps) > MAX_ENVELOPE_STEPS:
+        raise ValueError("steps must contain at most %d entries" % MAX_ENVELOPE_STEPS)
+    for step in steps:
+        for key in ("start", "length", "value"):
+            if key not in step:
+                raise ValueError("each step needs start, length and value")
+        if float(step["start"]) < 0:
+            raise ValueError("step start must be non-negative")
+        if float(step["length"]) <= 0:
+            raise ValueError("step length must be positive")
+        if not 0.0 <= float(step["value"]) <= 1.0:
+            raise ValueError("a send value must be between 0.0 and 1.0")
+    return bridge.call(
+        "set_clip_envelope",
+        track_index=track_index,
+        clip_index=clip_index,
+        send_index=send_index,
+        steps=steps,
+    )
+
+
+@mcp.tool()
 def get_transport_state() -> dict[str, Any]:
     """Arrangementのトランスポート位置・曲長・ループ・既存ロケーター一覧を読み取り専用で取得する。
     ロケーター配置は「再生ヘッドを動かしてからキューをトグルする」ため、意図しない位置に付く場合に

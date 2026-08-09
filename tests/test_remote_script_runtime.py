@@ -946,3 +946,137 @@ def test_creating_a_return_track_reports_where_it_landed():
     assert result["created_index"] == 2
     assert result["name"] == "Dub Delay"
     assert result["return_track_count"] == 3
+
+
+class _Envelope:
+    def __init__(self):
+        self.steps = []
+
+    def insert_step(self, start, length, value):
+        self.steps.append((start, length, value))
+
+    def value_at_time(self, time):
+        # Left-continuous, like Live: a sample on a boundary returns the step
+        # that ends there. The writer samples mid-step because of this.
+        found = None
+        for start, length, value in self.steps:
+            if start < time <= start + length:
+                found = value
+        return 0.0 if found is None else found
+
+
+class _EnvClip:
+    name = "KIHACHI Chords (full)"
+
+    def __init__(self):
+        self.envelopes = {}
+
+    def automation_envelope(self, parameter):
+        return self.envelopes.get(id(parameter))
+
+    def create_automation_envelope(self, parameter):
+        envelope = _Envelope()
+        self.envelopes[id(parameter)] = envelope
+        return envelope
+
+
+class _EnvSlot:
+    def __init__(self, clip):
+        self.has_clip = True
+        self.clip = clip
+
+
+class _EnvTrack:
+    name = "KIHACHI Chords"
+
+    def __init__(self, clip, sends):
+        self.clip_slots = [_EnvSlot(clip)]
+        self.mixer_device = _Mixer(sends)
+
+
+class _EnvSong:
+    def __init__(self, clip, sends):
+        self.tracks = [_EnvTrack(clip, sends)]
+        self.return_tracks = [_SendTrack("A-Reverb", []), _SendTrack("B-Delay", [])]
+
+
+def _send_envelope_surface(song):
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    surface.song = lambda: song
+    return surface
+
+
+def test_a_send_envelope_is_written_and_verified_mid_step():
+    """A dub delay throw is send automation, which device envelopes cannot reach."""
+
+    clip = _EnvClip()
+    song = _EnvSong(clip, [_Send(0.0), _Send(0.0)])
+    surface = _send_envelope_surface(song)
+
+    result = surface._execute(
+        "set_clip_envelope",
+        {
+            "track_index": 0,
+            "clip_index": 0,
+            "send_index": 1,
+            "steps": [
+                {"start": 0.0, "length": 64.0, "value": 0.1},
+                {"start": 64.0, "length": 64.0, "value": 0.7},
+            ],
+        },
+    )
+
+    assert result["device"] == "Mixer"
+    assert result["parameter"] == "Send B"
+    assert result["step_count"] == 2
+    assert result["verified_step_count"] == 2
+    assert [step["requested"] for step in result["steps"]] == [0.1, 0.7]
+
+
+def test_a_send_envelope_index_past_the_returns_is_refused():
+    clip = _EnvClip()
+    song = _EnvSong(clip, [_Send(0.0), _Send(0.0)])
+    surface = _send_envelope_surface(song)
+
+    try:
+        surface._execute(
+            "set_clip_envelope",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "send_index": 9,
+                "steps": [{"start": 0.0, "length": 4.0, "value": 0.5}],
+            },
+        )
+    except ValueError as error:
+        assert "out of range" in str(error)
+        assert "2 return track" in str(error)
+    else:
+        raise AssertionError("expected the out-of-range send envelope to be refused")
+
+
+def test_a_device_envelope_still_reports_its_own_device_and_parameter():
+    """The send branch must not change what a device envelope returns."""
+
+    clip = _EnvClip()
+    song = _EnvSong(clip, [_Send(0.0)])
+    surface = _send_envelope_surface(song)
+    parameter = _Send(0.0)
+    parameter.name = "Dry Wet"
+    device = types.SimpleNamespace(name="Echo")
+    surface._parameter = lambda *_args: (parameter, device)
+
+    result = surface._execute(
+        "set_clip_envelope",
+        {
+            "track_index": 0,
+            "clip_index": 0,
+            "device_index": 1,
+            "parameter_index": 52,
+            "steps": [{"start": 0.0, "length": 8.0, "value": 0.4}],
+        },
+    )
+
+    assert result["device"] == "Echo"
+    assert result["parameter"] == "Dry Wet"
