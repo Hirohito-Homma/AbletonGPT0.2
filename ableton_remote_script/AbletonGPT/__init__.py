@@ -1401,7 +1401,10 @@ class AbletonGPTControlSurface(ControlSurface):
     MAX_ENVELOPE_STEPS = 512
 
     def _set_clip_envelope(self, song, params):
-        """Write a step envelope for one device parameter onto a **Session** clip.
+        """Write a step envelope for one parameter onto a **Session** clip.
+
+        The target is a device-chain parameter (``device_index`` +
+        ``parameter_index``) or a mixer send (``send_index``).
 
         Clip envelopes are a Session-clip feature: Live documents
         ``automation_envelope`` as "Returns None for Arrangement clips", and there
@@ -1422,9 +1425,27 @@ class AbletonGPTControlSurface(ControlSurface):
             raise ValueError("clip slot is empty")
         clip = slot.clip
 
-        parameter, device = self._parameter(
-            song, params["track_index"], params["device_index"], params["parameter_index"]
-        )
+        # Two kinds of target, one writer. A send lives on the mixer rather than
+        # in the device chain, so `_parameter` cannot reach it -- but it is the
+        # same DeviceParameter type, and Live gives clip envelopes for both. A
+        # dub delay throw is send automation, which is why this branch exists.
+        if params.get("send_index") is not None:
+            sends = track.mixer_device.sends
+            send_index = int(params["send_index"])
+            if send_index < 0 or send_index >= len(sends):
+                raise ValueError(
+                    "send_index %d is out of range; this set has %d return track(s)"
+                    % (send_index, len(sends))
+                )
+            parameter = sends[send_index]
+            target_name = "Send %s" % chr(ord("A") + send_index)
+            device_name = "Mixer"
+        else:
+            parameter, device = self._parameter(
+                song, params["track_index"], params["device_index"], params["parameter_index"]
+            )
+            target_name = parameter.name
+            device_name = device.name
         if not parameter.is_enabled:
             raise ValueError("parameter is currently locked or macro-controlled")
 
@@ -1488,8 +1509,8 @@ class AbletonGPTControlSurface(ControlSurface):
         return {
             "track": track.name,
             "clip": clip.name,
-            "device": device.name,
-            "parameter": parameter.name,
+            "device": device_name,
+            "parameter": target_name,
             "parameter_min": minimum,
             "parameter_max": maximum,
             "step_count": len(written),

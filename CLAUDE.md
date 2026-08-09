@@ -12,6 +12,12 @@ Sends are `DeviceParameter` objects on `track.mixer_device`, the same kind of
 object as `volume` and `panning` -- which is why they are writable, and how that
 was established before any of this was built.
 
+`set_clip_send_envelope` automates a send across a Session clip, which is what a
+dub delay throw actually is. `set_clip_parameter_envelope` cannot do it: that
+resolves a parameter in the *device chain*, and a send is on the mixer. Both go
+through one writer in the Remote Script, so the left-continuous `value_at_time`
+handling is shared.
+
 `create_return_track` names are prefixed by Live: asking for "KIHACHI Dub"
 produces "C-KIHACHI Dub", following A-Reverb and B-Delay. There is no delete
 command; removing a return is a manual action in Live.
