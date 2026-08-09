@@ -128,6 +128,39 @@ parameter: `Chromatic`/`Noise Drums` land on Noise, the other five on Modulator.
 of this drives KIHACHI's MIDI vocoder part, which still needs External. The carrier a
 bare insertion lands on cannot be read back, for the same reason it cannot be set.
 
+## A plan may only write to tracks it created
+
+A KIHACHI plan addresses tracks by **absolute index**, but `create_track` *appends*.
+Those two agree only when the plan's `first_track_index` equals the track count the
+Set already had. Nothing enforced that, so the plan's own
+``"modifies_existing_tracks": false`` was a claim rather than a guarantee: run a
+default plan (`first_track_index: 0`) against a Set that already has tracks and
+`apply_live_drum_kit` loads a kit onto an *existing* empty track, while clips go into
+existing tracks' empty slots. The "never replace an instrument" guard does not fire,
+because an empty track has none. Offline preflight cannot catch this — it never sees
+the Set.
+
+`jobs.tracks` closes it. `build_track_expectation` is pure: it reads the plan's lowest
+targeted `track_index` (the base), counts `create_track` steps, and counts how many of
+those already ran. `verify_track_baseline` then does **one read-only `get_state`**
+before the first mutating step and requires `len(tracks) == base + creates_done` —
+exact for both a fresh run and a resume. The CLI runs it in `_execute`, so a mismatch
+returns 1 with nothing touched and the stored statuses unchanged.
+
+Two deliberate limits. It returns "no opinion" (`None`) rather than guessing when a
+`create_track` uses an explicit index instead of appending, because landing position
+then depends on insert order and a wrong guard is worse than none — KIHACHI always
+appends, so its plans are always checkable. And it is skipped for an executor with no
+`bridge`, which is how the existing test fakes stay unaffected; `AbletonStepExecutor`
+exposes `.bridge` for exactly this. `JobRunner` stays Live-free by design, which is
+why the check lives in the CLI rather than inside it.
+
+Verified against a running Live 12 with a 3-track Set: a default-offset plan was
+refused with *"Live has 3 track(s) but this plan was written for a Set with 0 …
+rebuild the plan with --first-track-index 3"*, exit 1, Set unchanged. Rebuilt with
+`--first-track-index 3` it ran 13/13, and the three pre-existing tracks kept their
+exact devices.
+
 ## Browsing: a device is not a folder, but you can still descend into it
 
 `_resolve_browser_node` descends a path segment into a folder **or into a device that

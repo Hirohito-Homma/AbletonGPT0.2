@@ -15,6 +15,13 @@ from .kihachi import (
 from .models import JobPlan, JobStep, StepStatus
 from .runner import JobRunner, JobRunResult, StepExecutor, StepResult
 from .store import load_job_plan, load_step_statuses, save_job_plan
+from .tracks import (
+    TRACK_TARGETING_COMMANDS,
+    TrackBaselineMismatch,
+    TrackExpectation,
+    build_track_expectation,
+    verify_track_baseline,
+)
 
 __all__ = [
     "PLACE_SCENE_COMMAND",
@@ -36,4 +43,9 @@ __all__ = [
     "KIHACHI_ARRANGEMENT_PLAN_VERSION",
     "KIHACHI_CORE_COMMANDS",
     "build_kihachi_job_plan",
+    "TRACK_TARGETING_COMMANDS",
+    "TrackBaselineMismatch",
+    "TrackExpectation",
+    "build_track_expectation",
+    "verify_track_baseline",
 ]

@@ -38,11 +38,14 @@ from ..jobs import (
     StepExecutor,
     StepStatus,
     InvalidKihachiPlan,
+    TrackBaselineMismatch,
     build_job_plan,
     build_kihachi_job_plan,
+    build_track_expectation,
     load_job_plan,
     load_step_statuses,
     save_job_plan,
+    verify_track_baseline,
 )
 
 #: Zero-arg callable that yields a fresh executor. Overridable for tests.
@@ -149,6 +152,26 @@ def _cmd_import_kihachi(args: argparse.Namespace, _factory: ExecutorFactory) -> 
     return 0
 
 
+def _guard_track_baseline(
+    executor: object, plan: JobPlan, completed_step_ids: tuple[str, ...]
+) -> None:
+    """Refuse the run when Live's track count is not what the plan assumes.
+
+    A plan addresses tracks by absolute index while ``create_track`` appends, so a
+    stale ``first_track_index`` silently retargets every clip and instrument at
+    tracks the plan does not own. The check is read-only and runs before the first
+    mutating step. It is skipped for an executor with no bridge (a test fake) and
+    for plans whose expectation cannot be derived.
+    """
+    bridge = getattr(executor, "bridge", None)
+    if bridge is None:
+        return
+    expectation = build_track_expectation(plan, completed_step_ids)
+    if expectation is None:
+        return
+    verify_track_baseline(bridge, expectation)
+
+
 def _execute(path: str, factory: ExecutorFactory, *, resume: bool) -> int:
     plan: JobPlan = load_job_plan(path)
     prior = load_step_statuses(path)
@@ -158,7 +181,15 @@ def _execute(path: str, factory: ExecutorFactory, *, resume: bool) -> int:
         else ()
     )
 
-    result = JobRunner(factory()).run(
+    executor = factory()
+    try:
+        _guard_track_baseline(executor, plan, completed_step_ids)
+    except TrackBaselineMismatch as exc:
+        # Nothing has been touched yet, and the stored statuses stay as they were.
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    result = JobRunner(executor).run(
         plan,
         completed_step_ids=completed_step_ids,
         persistence_path=path,

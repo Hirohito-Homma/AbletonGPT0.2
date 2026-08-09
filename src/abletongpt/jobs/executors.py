@@ -613,6 +613,16 @@ class AbletonStepExecutor:
         self._bridge: SupportsBridgeCall = bridge or AbletonBridge()
 
     @property
+    def bridge(self) -> SupportsBridgeCall:
+        """The Live connection, for read-only preflight checks before a run.
+
+        Exposed so the CLI can verify the Set matches the plan's track baseline
+        without constructing a second bridge. An executor that has no bridge (a
+        test fake) simply does not offer this, and the check is skipped.
+        """
+        return self._bridge
+
+    @property
     def supported_commands(self) -> tuple[str, ...]:
         return tuple(self.HANDLERS)
 
