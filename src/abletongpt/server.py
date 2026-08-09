@@ -26,6 +26,8 @@ from .audio import (
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
 from .develop import build_developed_arrangement
+from .drumkits import build_drum_kit_selection
+from .jobs.executors import apply_live_drum_kit as apply_drum_kit_step
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .groove import build_velocity_groove_plan
@@ -1684,6 +1686,53 @@ def apply_live_instrument_selection(
         "next_step": (
             selection["content_note"]
             or "再生して音域と音色を確認し、必要ならデバイスのパラメーターを調整してください。"
+        ),
+    }
+
+
+@mcp.tool()
+def plan_live_drum_kit(
+    genre: str = "pop",
+    mood: str = "bright",
+    role: str = "drums",
+    preferred_kit: str = "",
+) -> dict[str, Any]:
+    """Liveを変更せず、ジャンル・ムード・ドラム役割からCore Libraryのキット候補を順位付けする。
+    空のDrum Rackを挿すapply_live_instrument_selectionと違い、実際に音の出るキットを選ぶ。
+    ブラウザ上の位置(path/URI)はここでは決めず、適用時にLiveを走査して解決する。"""
+    return build_drum_kit_selection(genre, mood, role, preferred_kit)
+
+
+@mcp.tool()
+def apply_live_drum_kit(
+    track_index: int,
+    genre: str = "pop",
+    mood: str = "bright",
+    role: str = "drums",
+    preferred_kit: str = "",
+) -> dict[str, Any]:
+    """確認済みのキット選択を、インストゥルメントを持たないMIDIトラック1本へロードする。
+    候補名をLiveブラウザで走査して実在するものを選び、1トラックにつきキットは1台だけ。
+    既存インストゥルメントは置き換えない(候補と一致する場合のみ適用済みとして扱う)。"""
+    if track_index < 0:
+        raise ValueError("track_index must be non-negative")
+    selection = build_drum_kit_selection(genre, mood, role, preferred_kit)
+    applied = apply_drum_kit_step(
+        bridge,
+        {
+            "track_index": track_index,
+            "role": role,
+            "genre": genre,
+            "mood": mood,
+            "preferred_kit": preferred_kit,
+        },
+    )
+    return {
+        "selection": selection,
+        "applied": applied,
+        "next_step": (
+            "再生してキックとスネアのピッチマッピングを確認し、必要なら"
+            "browse_device_presetsで別のキットを選び直してください。"
         ),
     }
 

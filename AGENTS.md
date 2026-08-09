@@ -24,15 +24,71 @@ command; removing a return is a manual action in Live.
 
 KIHACHI plans enter through `jobs import-kihachi`, which is a pure preflight: it
 accepts plan version 0.1, `planned_not_applied`, the existing `set_tempo`, and only
-the five additive core operations (`create_track`, `apply_live_instrument_selection`,
-`create_midi_clip`, `set_clip_send_envelope`, `copy_session_clip_to_arrangement`).
+the six additive core operations (`create_track`, `apply_live_instrument_selection`,
+`apply_live_drum_kit`, `create_midi_clip`, `set_clip_send_envelope`,
+`copy_session_clip_to_arrangement`).
 Instrument selection accepts a semantic role/genre/mood, then AbletonGPT owns the
 native-device candidates and sends `insert_first_available_instrument` to Live.
 Resume accepts one candidate-matching instrument; a different existing instrument
-is never replaced. Drums stay outside this operation until an actual kit preset is
-resolved, because an empty Drum Rack or Impulse is silent. The resulting saved
+is never replaced. The resulting saved
 JobPlan remains pending until a separate `jobs run`/`resume`; unknown operations or
 bad parameters reject the whole import before any Live bridge call.
+
+**Drums take a separate operation, because a device is not a kit.** Inserting Drum
+Rack or Impulse succeeds and stays *silent* — `instruments.py` marks both
+`requires_content` — so drums were originally excluded from instrument selection
+altogether. `apply_live_drum_kit` closes that gap without weakening the boundary:
+KIHACHI still sends only `track_index`/`role`/`genre`/`mood` (role is `drums`, or
+`kick`/`snare`/`percussion` for the split layout, and every split track gets its
+own kit because a track with no instrument is silent however few pitches it plays).
+`drumkits.py` owns the ordered Core Library kit *names* and nothing else — no path,
+no URI, no `.adg`. Where a kit lives is a fact about the installed Live, so
+`jobs.executors.apply_live_drum_kit` **discovers** it by walking the read-only
+`browse_presets` tree under the `drums` root breadth-first (shallowest duplicate
+wins — `Fabrik Kit` ships in both Core Library and a Pack — bounded to depth 3 / 64
+calls so a self-referential folder cannot loop), then loads the first candidate that
+actually exists via `load_preset` and verifies the readback.
+
+Two things about that browser were measured against a running Live 12 and are not
+guessable. **Names carry their file extension**: the root lists `"909 Core Kit.adg"`,
+so a match on `"909 Core Kit"` finds nothing. `_kit_key` strips `.adg` for matching
+while the *unstripped* name is what gets loaded, because that is what `load_preset`
+compares against; Live then names the resulting device with the extension dropped,
+which is what the readback sees. **The root is flat and huge**: 627 loadable items
+with Core Library and Packs side by side, plus a `Drum Hits` folder whose subtree
+made a full walk enumerate 7689 items in 13s *per track*. So the walk short-circuits
+as soon as the first-choice candidate is found (nothing deeper can outrank it),
+which brought that to one call and 0.67s; a genuinely missing first choice still
+falls back to the full bounded walk. Note the bare `Drum Rack` **device** is itself
+loadable in that same root — loading it is the silent-kit bug, so it must never be a
+candidate name.
+
+Verified end to end on 2026-08-10, as a real 24-step `jobs import-kihachi` →
+`jobs run` (completed=24 failed=0): `KIHACHI Kick` and `KIHACHI Drums` got
+`909 Core Kit`, `KIHACHI Percussion` got `Percussion Core Kit`, Bass got Operator,
+Chords got Wavetable, and playing the Arrangement peaked every drum track's meter
+(0.78-0.84) with Master at 0.93. Re-running the operation on a loaded track was a
+no-op, and a track holding a Drift was refused without being touched. All Core
+Library racks map pitches 35-50 contiguously, which covers every pitch KIHACHI
+writes (36/39/42/46) and every `DRUM_ROLES` split range, so no note lands on an
+empty pad.
+
+**A MIDI track's `output_meter_level` is not proof of audio — never verify a kit
+with it.** Measured on the same run: the instrument-less `KIHACHI Vocoder` track
+read 0.53 while Master read 0.00 with it soloed, and it kept reading 0.53 with the
+track *muted*. Live shows MIDI note activity on that meter when a track has no
+instrument, so an empty Drum Rack — the exact failure this operation exists to
+prevent — would sail through a meter check. That is why the readback here is device
+presence plus a name match, and it must stay that way. (Measuring the master needs a
+settle pause first; reverb/delay tails from a previous playback otherwise read as a
+false positive, which they did once here at 0.32 before a 0.6 s stop was added.) The same function backs both the job step and the `apply_live_drum_kit`
+MCP tool, so the two paths cannot drift. Safety is doubled up: the handler refuses
+a track holding a different instrument, and the Remote Script's `load_preset`
+refuses an instrument-category load onto an occupied track on its own. A track
+already holding a candidate kit is treated as done, so resume never stacks a second
+rack. Offline preflight has no browser, so `_ValidationBridge` stands in every name
+`drumkits.ALL_KIT_NAMES` can propose — that checks the walk and the load parameters;
+whether a kit is really installed is a question only the live browser answers.
 
 **Reloading the Remote Script needs a full Live restart.** Re-selecting the
 control surface re-instantiates the class but Python keeps the module in
@@ -96,6 +152,11 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   (degree progressions, voice-leading via nearest-inversion, density/swing/humanize, `seed`).
 - **`contextual.py`** — read-only analysis of an existing MIDI clip + complementary-part planning.
 - **`instruments.py`** — role/genre/mood → native-instrument selection with ordered fallbacks.
+- **`drumkits.py`** — role/genre/mood → ordered Core Library drum *kit* candidates, the sibling of
+  `instruments.py` for the one role device insertion cannot serve (an inserted Drum Rack is silent).
+  Names only: it never knows a browser path or URI, because that is a fact about the installed Live
+  and is resolved by walking the browser at apply time. Mood re-ranks within a genre's pool and can
+  never promote a kit the genre did not list. Pure, stdlib-only, deterministic.
 - **`vocal.py`** — lyrics → editable Vocal Guide MIDI and the external-render handoff contract.
 - **`loudness.py`** — offline BS.1770 / EBU R128 analysis of WAV/AIFF; reads the file, never writes.
 - **`audio.py`** — offline audio-track feature extraction (tempo, key, chord progression,
@@ -280,7 +341,7 @@ Script. New tools must uphold them:
 
 ## Testing note
 
-`uv run pytest` runs the whole suite (72 files, ~733 tests). `scripts/run_checks.py` is a separate,
+`uv run pytest` runs the whole suite (74 files, ~766 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
 smoke test of every module. Its printed total adds a hardcoded `+ 51` for those import checks, so

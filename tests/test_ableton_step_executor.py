@@ -105,6 +105,7 @@ def test_executor_satisfies_step_executor_protocol():
         "get_tracks",
         "create_track",
         "apply_live_instrument_selection",
+        "apply_live_drum_kit",
         "create_midi_clip",
         "set_clip_send_envelope",
         "copy_session_clip_to_arrangement",

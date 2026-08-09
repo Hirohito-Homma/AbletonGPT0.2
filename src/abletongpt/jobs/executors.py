@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ..bridge import AbletonBridge, AbletonConnectionError
+from ..drumkits import build_drum_kit_selection
 from ..instruments import build_role_selection
 from .models import JobStep
 
@@ -220,6 +221,168 @@ def _apply_live_instrument_selection(
     return result
 
 
+#: Bounds on the read-only browser walk that resolves a kit name to a folder
+#: path. The Core Library drum tree is one level of group folders holding kits,
+#: but a user library can nest deeper, so allow a little room and cap the total
+#: work either way. Browsing is read-only, so an exhausted budget is a failure
+#: to find a kit, never a partial change.
+_MAX_BROWSER_DEPTH = 3
+_MAX_BROWSER_CALLS = 64
+
+
+def _kit_key(name: str) -> str:
+    """A browser item's name reduced to the kit name a selector would use.
+
+    Live's browser reports presets with their file extension -- the verified
+    ``drums`` root lists ``"909 Core Kit.adg"``, not ``"909 Core Kit"`` -- while
+    :mod:`abletongpt.drumkits` names kits musically and knows nothing about file
+    formats. Normalising here keeps it that way; the *unstripped* name is what
+    gets loaded, because that is the one ``load_preset`` matches on.
+    """
+
+    stripped = name.strip()
+    return stripped[:-4] if stripped.lower().endswith(".adg") else stripped
+
+
+def _drum_kit_locations(
+    bridge: SupportsBridgeCall,
+    stop_when_found: str = "",
+) -> dict[str, tuple[list[str], str]]:
+    """Map each loadable kit under the ``drums`` root to its (path, browser name).
+
+    The location is discovered rather than assumed. Live's browser tree is a fact
+    about the installation -- on the verified machine the ``drums`` root is flat,
+    holding 627 items from Core Library and Packs side by side, but a user
+    library can nest -- and neither KIHACHI nor :mod:`abletongpt.drumkits` is
+    allowed to know it. Walking is breadth-first so the shallowest match for a
+    duplicated kit name wins (``Fabrik Kit`` ships in both Core Library and a
+    Pack), which is the one a person would have clicked.
+
+    ``stop_when_found`` ends the walk the moment the caller's *first-choice* kit
+    turns up, because nothing found later can outrank it. This is not a
+    micro-optimisation: the ``drums`` root also holds a ``Drum Hits`` folder of
+    individual samples, and walking it on the verified machine enumerated 7689
+    items in 13s -- per drum track -- where stopping at the root finds the kit in
+    one call. When the first choice is genuinely absent the full bounded walk
+    still runs, so fallback behaviour is unchanged.
+    """
+
+    found: dict[str, tuple[list[str], str]] = {}
+    queue: list[list[str]] = [[]]
+    calls = 0
+    while queue and calls < _MAX_BROWSER_CALLS:
+        if stop_when_found and stop_when_found in found:
+            break
+        path = queue.pop(0)
+        calls += 1
+        listing = bridge.call("browse_presets", category="drums", path=list(path), max_items=1000)
+        items = listing.get("items", []) if isinstance(listing, Mapping) else []
+        if not isinstance(items, list):
+            raise RuntimeError("browse_presets returned an invalid item list")
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            if item.get("is_folder"):
+                if len(path) < _MAX_BROWSER_DEPTH:
+                    queue.append(path + [name])
+                continue
+            if not item.get("is_loadable"):
+                continue
+            key = _kit_key(name)
+            if key not in found:
+                found[key] = (list(path), name)
+    return found
+
+
+def apply_live_drum_kit(bridge: SupportsBridgeCall, params: dict) -> Any:
+    """Load exactly one Browser drum kit onto one empty Drums track.
+
+    Public because the ``apply_live_drum_kit`` MCP tool calls it directly. Both
+    entry points must resolve, load and verify identically -- a second
+    implementation on the server side is exactly how the two paths would drift.
+
+    The counterpart of :func:`_apply_live_instrument_selection` for the one role
+    that device insertion cannot serve. KIHACHI names the musical intent (track,
+    role, genre, mood); AbletonGPT owns the kit names, their order, where they
+    live in the browser and the readback that proves one kit arrived.
+
+    Safety is the same shape as instrument selection and is enforced twice: this
+    handler refuses a track that already holds a *different* instrument, and the
+    Remote Script's ``load_preset`` refuses an instrument-category load onto an
+    occupied track independently. A track already holding a candidate kit is
+    treated as done, so a resumed job never stacks a second rack.
+    """
+
+    _exact_params(
+        params,
+        required=("track_index", "role", "genre", "mood"),
+        optional=("live_edition", "preferred_kit"),
+    )
+    track_index = _non_negative_index(params["track_index"], "track_index")
+    values: dict[str, str] = {}
+    for field in ("role", "genre", "mood"):
+        value = params[field]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("%s must be a non-empty string" % field)
+        values[field] = value.strip()
+    # Accepted and ignored: a kit is a Browser preset, so unlike a native device
+    # its availability does not follow the Live edition. Taking the field keeps
+    # one KIHACHI operation shape for both instrument paths.
+    live_edition = params.get("live_edition", "unknown")
+    if not isinstance(live_edition, str) or not live_edition.strip():
+        raise ValueError("live_edition must be a non-empty string")
+    preferred = params.get("preferred_kit", "")
+    if not isinstance(preferred, str):
+        raise ValueError("preferred_kit must be a string")
+
+    selection = build_drum_kit_selection(
+        values["genre"], values["mood"], values["role"], preferred.strip()
+    )
+    candidates = list(selection["candidates"])
+
+    existing = _instrument_devices(bridge, track_index)
+    if existing:
+        if _has_one_matching_instrument(existing, candidates):
+            return None
+        raise ValueError(
+            "target track already contains a different instrument; refusing to replace it"
+        )
+
+    locations = _drum_kit_locations(bridge, stop_when_found=candidates[0])
+    chosen = next((name for name in candidates if name in locations), None)
+    if chosen is None:
+        raise RuntimeError(
+            "no candidate drum kit found in Live's browser (looked for: %s)"
+            % ", ".join(candidates)
+        )
+    path, browser_name = locations[chosen]
+
+    call_params = {
+        "track_index": track_index,
+        "category": "drums",
+        "path": path,
+        "name": browser_name,
+    }
+    try:
+        result = bridge.call("load_preset", _timeout=30.0, **call_params)
+    except (AbletonConnectionError, RuntimeError):
+        # Loading a rack can outrun the socket while still succeeding in Live.
+        # Only an exact readback turns that ambiguity into success.
+        if _has_one_matching_instrument(
+            _instrument_devices(bridge, track_index), [chosen]
+        ):
+            return None
+        raise
+    if not _has_one_matching_instrument(
+        _instrument_devices(bridge, track_index), [chosen]
+    ):
+        raise RuntimeError("Live drum kit readback does not match the loaded kit")
+    return result
+
+
 def _create_midi_clip(bridge: SupportsBridgeCall, params: dict) -> Any:
     _exact_params(
         params,
@@ -420,10 +583,10 @@ def _copy_session_clip_to_arrangement(
 class AbletonStepExecutor:
     """Connects a :class:`JobStep` to real Ableton operations via the bridge.
 
-    The allowlist covers transport/tempo/read commands plus the five additive
+    The allowlist covers transport/tempo/read commands plus the six additive
     KIHACHI core operations: create a track, add a role-selected native
-    instrument, create a Session MIDI clip, write a send envelope, then copy that
-    clip to the Arrangement. Any other command fails
+    instrument *or* load a role-selected Browser drum kit, create a Session MIDI
+    clip, write a send envelope, then copy that clip to the Arrangement. Any other command fails
     safely as an :class:`UnsupportedStepCommand`. Bridge/connection errors are **not** swallowed;
     they propagate so :class:`~abletongpt.jobs.runner.JobRunner` records the step as
     FAILED with the error text. Satisfies the ``StepExecutor`` protocol.
@@ -439,6 +602,7 @@ class AbletonStepExecutor:
         "get_tracks": _get_tracks,
         "create_track": _create_track,
         "apply_live_instrument_selection": _apply_live_instrument_selection,
+        "apply_live_drum_kit": apply_live_drum_kit,
         "create_midi_clip": _create_midi_clip,
         "set_clip_send_envelope": _set_clip_send_envelope,
         "copy_session_clip_to_arrangement": _copy_session_clip_to_arrangement,
