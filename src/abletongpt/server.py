@@ -2432,6 +2432,36 @@ def set_track_pan(track_index: int, pan: float) -> dict[str, Any]:
 
 
 @mcp.tool()
+def set_track_send(
+    track_index: int, send_index: int, value: float, normalized: bool = True
+) -> dict[str, Any]:
+    """トラックのSend量を設定する。send_index=0がリターンA、1がBに対応する。
+
+    normalized=Trueなら0.0〜1.0で指定する（既定）。ダブのディレイ・スローのように
+    セクションごとに送り量を変える用途を想定している。
+    """
+    if track_index < 0 or send_index < 0:
+        raise ValueError("track_index and send_index must be non-negative")
+    if normalized and not 0.0 <= value <= 1.0:
+        raise ValueError("a normalized send value must be between 0.0 and 1.0")
+    return bridge.call(
+        "set_track_send",
+        track_index=track_index,
+        send_index=send_index,
+        value=value,
+        normalized=normalized,
+    )
+
+
+@mcp.tool()
+def create_return_track(name: str = "") -> dict[str, Any]:
+    """リターントラックを追加する。Liveの既定セットには既にA-ReverbとB-Delayがある。"""
+    if len(name) > 200:
+        raise ValueError("name must be 200 characters or fewer")
+    return bridge.call("create_return_track", name=name)
+
+
+@mcp.tool()
 def set_track_mute(track_index: int, muted: bool) -> dict[str, Any]:
     """トラックのMuteを切り替える。"""
     if track_index < 0:

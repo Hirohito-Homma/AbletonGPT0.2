@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Sends and return tracks
+
+`set_track_send` writes a track's send amount; `create_return_track` adds a
+return. Both were verified against a running Live 12 Beta: writing 0.42 to send 1
+read back as 0.42 and Live displayed -23.2 dB on B-Delay.
+
+Sends are `DeviceParameter` objects on `track.mixer_device`, the same kind of
+object as `volume` and `panning` -- which is why they are writable, and how that
+was established before any of this was built.
+
+`create_return_track` names are prefixed by Live: asking for "KIHACHI Dub"
+produces "C-KIHACHI Dub", following A-Reverb and B-Delay. There is no delete
+command; removing a return is a manual action in Live.
+
+**Reloading the Remote Script needs a full Live restart.** Re-selecting the
+control surface re-instantiates the class but Python keeps the module in
+`sys.modules`, so the file is never re-read -- confirmed by the file's access
+time not moving. The script is installed in *two* places on this machine and both
+have to be updated:
+`~/Music/Ableton/User Library/Remote Scripts/AbletonGPT_MCP/` and the same path
+under the external drive's `12.4b` User Library. Delete `__pycache__` in both.
+
 ## Commands
 
 ```bash
