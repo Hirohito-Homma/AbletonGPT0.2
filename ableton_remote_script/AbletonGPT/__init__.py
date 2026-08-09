@@ -682,6 +682,49 @@ class AbletonGPTControlSurface(ControlSurface):
             track = self._track(song, params["track_index"])
             track.mixer_device.volume.value = float(params["volume"])
             return {"track": track.name, "volume": float(track.mixer_device.volume.value)}
+        if command == "set_track_send":
+            track = self._track(song, params["track_index"])
+            sends = track.mixer_device.sends
+            send_index = int(params["send_index"])
+            if send_index < 0 or send_index >= len(sends):
+                raise ValueError(
+                    "send_index %d is out of range; this set has %d return track(s)"
+                    % (send_index, len(sends))
+                )
+            send = sends[send_index]
+            if not send.is_enabled:
+                raise ValueError("send is currently locked or macro-controlled")
+            value = float(params["value"])
+            if params.get("normalized", True):
+                value = float(send.min) + value * (float(send.max) - float(send.min))
+            if value < float(send.min) or value > float(send.max):
+                raise ValueError("send value out of range")
+            send.value = value
+            return {
+                "track": track.name,
+                "send_index": send_index,
+                "value": float(send.value),
+                "display_value": str(send),
+                "return_track": (
+                    song.return_tracks[send_index].name
+                    if send_index < len(song.return_tracks)
+                    else None
+                ),
+            }
+        if command == "create_return_track":
+            # Live's default set already ships A-Reverb and B-Delay, so this is
+            # for adding to them rather than for getting started.
+            before = len(song.return_tracks)
+            song.create_return_track()
+            created = song.return_tracks[-1]
+            name = params.get("name")
+            if name:
+                created.name = str(name)[:200]
+            return {
+                "created_index": before,
+                "name": created.name,
+                "return_track_count": len(song.return_tracks),
+            }
         if command == "set_track_pan":
             track = self._track(song, params["track_index"])
             track.mixer_device.panning.value = float(params["pan"])

@@ -828,3 +828,121 @@ def test_clip_envelope_refuses_an_empty_slot():
         assert "empty" in str(exc)
     else:
         raise AssertionError("an empty clip slot must be refused")
+
+
+class _Send:
+    """A Live send: a DeviceParameter on the track's mixer, like volume."""
+
+    def __init__(self, value=0.0, enabled=True):
+        self.value = value
+        self.min = 0.0
+        self.max = 1.0
+        self.is_enabled = enabled
+
+    def __str__(self):
+        return "%.1f %%" % (self.value * 100.0)
+
+
+class _Mixer:
+    def __init__(self, sends):
+        self.sends = sends
+
+
+class _SendTrack:
+    def __init__(self, name, sends):
+        self.name = name
+        self.mixer_device = _Mixer(sends)
+
+
+class _SendSong:
+    def __init__(self, sends, returns=("A-Reverb", "B-Delay")):
+        self.tracks = [_SendTrack("KIHACHI Chords", sends)]
+        self.return_tracks = [_SendTrack(name, []) for name in returns]
+        self.created = 0
+
+    def create_return_track(self):
+        self.created += 1
+        self.return_tracks.append(_SendTrack("C-Return", []))
+
+
+def _send_surface(song):
+    """A surface with only what these commands touch: song() and the real _track."""
+
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    surface.song = lambda: song
+    return surface, song
+
+
+def test_a_send_can_be_written_and_reads_back():
+    """Sends are mixer DeviceParameters, the same kind of object as volume."""
+
+    song = _SendSong([_Send(0.0), _Send(0.0)])
+    surface, song = _send_surface(song)
+
+    result = surface._execute(
+        "set_track_send", {"track_index": 0, "send_index": 1, "value": 0.42}
+    )
+
+    assert song.tracks[0].mixer_device.sends[1].value == 0.42
+    assert result["value"] == 0.42
+    assert result["return_track"] == "B-Delay"
+    assert song.tracks[0].mixer_device.sends[0].value == 0.0
+
+
+def test_a_send_index_past_the_return_tracks_is_refused():
+    """The message has to say how many returns there are, or you guess."""
+
+    song = _SendSong([_Send(0.0), _Send(0.0)])
+    surface, song = _send_surface(song)
+
+    try:
+        surface._execute(
+            "set_track_send", {"track_index": 0, "send_index": 5, "value": 0.3}
+        )
+    except ValueError as error:
+        assert "out of range" in str(error)
+        assert "2 return track" in str(error)
+    else:
+        raise AssertionError("expected the out-of-range send to be refused")
+
+
+def test_a_locked_send_is_refused_rather_than_silently_ignored():
+    song = _SendSong([_Send(0.0, enabled=False)])
+    surface, song = _send_surface(song)
+
+    try:
+        surface._execute(
+            "set_track_send", {"track_index": 0, "send_index": 0, "value": 0.3}
+        )
+    except ValueError as error:
+        assert "locked" in str(error)
+    else:
+        raise AssertionError("expected a macro-controlled send to be refused")
+
+
+def test_a_send_outside_the_parameter_range_is_refused():
+    song = _SendSong([_Send(0.0)])
+    surface, song = _send_surface(song)
+
+    try:
+        surface._execute(
+            "set_track_send",
+            {"track_index": 0, "send_index": 0, "value": 3.0, "normalized": False},
+        )
+    except ValueError as error:
+        assert "out of range" in str(error)
+    else:
+        raise AssertionError("expected an out-of-range send value to be refused")
+
+
+def test_creating_a_return_track_reports_where_it_landed():
+    song = _SendSong([_Send(0.0), _Send(0.0)])
+    surface, song = _send_surface(song)
+
+    result = surface._execute("create_return_track", {"name": "Dub Delay"})
+
+    assert song.created == 1
+    assert result["created_index"] == 2
+    assert result["name"] == "Dub Delay"
+    assert result["return_track_count"] == 3
