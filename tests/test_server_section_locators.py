@@ -86,9 +86,9 @@ def test_create_places_every_locator_at_its_planned_beat(monkeypatch):
     assert result["created_count"] == 3
     assert [cue["time"] for cue in bridge.cues] == [0.0, 64.0, 128.0]
     assert [cue["name"] for cue in bridge.cues] == [
-        "1 minimal_intro",
-        "2 psychedelic_drop",
-        "3 outro",
+        "minimal_intro",
+        "psychedelic_drop",
+        "outro",
     ]
     assert result["source"] == "explicit_sections"
     assert result["planned_count"] == 3
@@ -191,7 +191,7 @@ def test_transport_state_is_read_only(monkeypatch):
         "song_length": 544.0,
         "is_playing": False,
         "loop": False,
-        "cue_points": [{"time": 0.0, "name": "1 intro"}],
+        "cue_points": [{"time": 0.0, "name": "intro"}],
         "cue_count": 1,
         "read_only": True,
     }

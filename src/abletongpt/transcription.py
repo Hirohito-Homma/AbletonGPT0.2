@@ -222,10 +222,15 @@ def build_locators_from_sections(
         if previous_bar is not None and start_bar <= previous_bar:
             raise ValueError("sections must be ordered by start_bar without duplicates")
         previous_bar = start_bar
+        # No index prefix. The number would be per *call*, so placing sections
+        # in two calls restarts it at 1 -- which is how a set ended up with a
+        # fourth locator named "1 mutation_build_1". Section names are already
+        # distinct, and Live orders locators by time, so the number carried
+        # nothing the timeline did not already show.
         name = str(section.get("name") or "Section %d" % (index + 1))[:100]
         locators.append(
             {
-                "name": "%d %s" % (index + 1, name),
+                "name": name,
                 "start_bar": start_bar,
                 "time_beats": round((start_bar - 1) * beats_per_bar, 6),
             }

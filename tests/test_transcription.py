@@ -228,7 +228,7 @@ def test_locators_from_sections_convert_bars_to_beats_without_a_tempo():
 
     assert plan["beats_per_bar"] == 4.0
     assert [locator["time_beats"] for locator in plan["locators"]] == [0.0, 64.0, 128.0]
-    assert [locator["name"] for locator in plan["locators"]] == ["1 intro", "2 drop", "3 outro"]
+    assert [locator["name"] for locator in plan["locators"]] == ["intro", "drop", "outro"]
     assert plan["count"] == 3
 
 
@@ -276,4 +276,36 @@ def test_locators_from_sections_reject_unusable_input():
 def test_locators_from_sections_name_unnamed_sections():
     plan = build_locators_from_sections([{"start_bar": 1}, {"start_bar": 5}])
 
-    assert [locator["name"] for locator in plan["locators"]] == ["1 Section 1", "2 Section 2"]
+    assert [locator["name"] for locator in plan["locators"]] == ["Section 1", "Section 2"]
+
+
+def test_section_locator_names_do_not_carry_a_call_local_index():
+    """The number restarted at 1 when sections were placed in two calls.
+
+    A Live set ended up with a fourth locator named "1 mutation_build_1"
+    alongside 1, 2, 3, 5, 6, 7, 8, 9 that way. Live orders locators by time, so
+    the prefix never carried anything the timeline did not already show.
+    """
+
+    first = build_locators_from_sections(
+        [{"name": "intro", "start_bar": 1}, {"name": "groove", "start_bar": 9}]
+    )
+    second = build_locators_from_sections([{"name": "drop", "start_bar": 17}])
+
+    names = [locator["name"] for locator in first["locators"] + second["locators"]]
+    assert names == ["intro", "groove", "drop"]
+    assert not any(name[0].isdigit() for name in names)
+
+
+def test_structure_locators_keep_their_index():
+    """Audio-derived labels repeat -- an A B A form gives two locators called A.
+
+    Section names are distinct by construction; these are not, so the number is
+    the only thing telling them apart in Live's locator list.
+    """
+
+    plan = build_locators_from_structure(
+        _structure([(0.0, 4.0, "A"), (4.0, 8.0, "B"), (8.0, 12.0, "A")]), 120.0
+    )
+
+    assert [locator["name"] for locator in plan["locators"]] == ["1 A", "2 B", "3 A"]
