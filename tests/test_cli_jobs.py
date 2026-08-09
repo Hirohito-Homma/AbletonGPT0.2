@@ -29,6 +29,17 @@ class FakeExecutor:
             raise RuntimeError("boom: %s" % step.step_id)
 
 
+class SimulatedProcessExit(BaseException):
+    """Models termination that JobRunner deliberately cannot catch."""
+
+
+class InterruptingExecutor(FakeExecutor):
+    def execute(self, step: JobStep) -> None:
+        self.executed.append(step.step_id)
+        if len(self.executed) == 2:
+            raise SimulatedProcessExit("process stopped")
+
+
 def _factory(executor: FakeExecutor):
     """Executor factory that always returns the same fake, so tests can inspect it."""
     return lambda: executor
@@ -69,6 +80,22 @@ def _sample_plan() -> JobPlan:
             JobStep("02_c", "get_tracks"),
         ),
     )
+
+
+def _write_kihachi_plan(path: Path, *, operation="set_tempo") -> Path:
+    params = (
+        {"bpm": 110}
+        if operation == "set_tempo"
+        else {"file_path": "/tmp/take.wav"}
+    )
+    document = {
+        "arrangement_plan_version": "0.1",
+        "execution_state": "planned_not_applied",
+        "song": {"title": "KIHACHI CLI"},
+        "operations": [{"op": operation, "params": params}],
+    }
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
 
 
 # --- create ----------------------------------------------------------------------
@@ -115,6 +142,52 @@ def test_create_makes_missing_parent_directories(tmp_path: Path):
     assert rc == 0
     assert out.exists()  # save_job_plan created nested/deep/
     assert load_job_plan(out).step_ids == ("00_place_scene_intro", "01_place_scene_drop")
+
+
+# --- import-kihachi --------------------------------------------------------------
+
+def test_import_kihachi_writes_a_pending_job_without_executing(tmp_path: Path, capsys):
+    source = _write_kihachi_plan(tmp_path / "arrangement_plan.json")
+    out = tmp_path / "kihachi-job.json"
+    executor = FakeExecutor()
+
+    rc = main(
+        [
+            "import-kihachi",
+            "--arrangement-plan",
+            str(source),
+            "--out",
+            str(out),
+        ],
+        executor_factory=_factory(executor),
+    )
+
+    assert rc == 0
+    assert executor.executed == []
+    assert load_job_plan(out).step_ids == ("0000_set_tempo",)
+    assert set(load_step_statuses(out).values()) == {StepStatus.PENDING}
+    assert "imported KIHACHI plan" in capsys.readouterr().out
+
+
+def test_import_kihachi_rejects_non_core_plan_without_writing(tmp_path: Path, capsys):
+    source = _write_kihachi_plan(
+        tmp_path / "arrangement_plan.json", operation="import_vocal_take"
+    )
+    out = tmp_path / "kihachi-job.json"
+
+    rc = main(
+        [
+            "import-kihachi",
+            "--arrangement-plan",
+            str(source),
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert rc == 2
+    assert not out.exists()
+    assert "import_vocal_take" in capsys.readouterr().err
 
 
 # --- status ----------------------------------------------------------------------
@@ -173,6 +246,22 @@ def test_run_executes_pending_steps_and_resaves_status(tmp_path: Path, capsys):
     # Progress was written back to the same file.
     assert set(load_step_statuses(path).values()) == {StepStatus.SUCCEEDED}
     assert "completed=3 failed=0 pending=0" in capsys.readouterr().out
+
+
+def test_run_persists_each_completed_step_before_a_process_exit(tmp_path: Path):
+    path = tmp_path / "plan.json"
+    save_job_plan(_sample_plan(), path)
+
+    with pytest.raises(SimulatedProcessExit):
+        main(
+            ["run", "--plan", str(path)],
+            executor_factory=_factory(InterruptingExecutor()),
+        )
+
+    statuses = load_step_statuses(path)
+    assert statuses["00_a"] is StepStatus.SUCCEEDED
+    assert statuses["01_b"] is StepStatus.PENDING
+    assert statuses["02_c"] is StepStatus.PENDING
 
 
 # --- resume ----------------------------------------------------------------------

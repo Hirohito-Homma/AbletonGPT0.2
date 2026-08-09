@@ -37,7 +37,9 @@ from ..jobs import (
     JobRunResult,
     StepExecutor,
     StepStatus,
+    InvalidKihachiPlan,
     build_job_plan,
+    build_kihachi_job_plan,
     load_job_plan,
     load_step_statuses,
     save_job_plan,
@@ -118,6 +120,35 @@ def _cmd_create(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
     return 0
 
 
+def _cmd_import_kihachi(args: argparse.Namespace, _factory: ExecutorFactory) -> int:
+    """Preflight KIHACHI JSON and persist it as a reviewable pending job plan."""
+    try:
+        document = read_json_document(args.arrangement_plan)
+        job_plan = build_kihachi_job_plan(document)
+    except (OSError, json.JSONDecodeError, InvalidKihachiPlan) as exc:
+        print("import-kihachi: %s" % exc, file=sys.stderr)
+        return 2
+    out_path = save_job_plan(job_plan, args.out)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "name": job_plan.name,
+                    "path": str(out_path),
+                    "step_count": len(job_plan.steps),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    print(
+        "imported KIHACHI plan '%s' with %d step(s) -> %s"
+        % (job_plan.name, len(job_plan.steps), out_path)
+    )
+    return 0
+
+
 def _execute(path: str, factory: ExecutorFactory, *, resume: bool) -> int:
     plan: JobPlan = load_job_plan(path)
     prior = load_step_statuses(path)
@@ -127,7 +158,11 @@ def _execute(path: str, factory: ExecutorFactory, *, resume: bool) -> int:
         else ()
     )
 
-    result = JobRunner(factory()).run(plan, completed_step_ids=completed_step_ids)
+    result = JobRunner(factory()).run(
+        plan,
+        completed_step_ids=completed_step_ids,
+        persistence_path=path,
+    )
 
     final = _merge_statuses(prior, result)
     save_job_plan(plan, path, statuses=final)  # re-save with fresh progress
@@ -614,6 +649,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report the created plan as JSON (name, path, step_count) instead of text.",
     )
     create.set_defaults(func=_cmd_create)
+
+    import_kihachi = sub.add_parser(
+        "import-kihachi",
+        help="Validate KIHACHI arrangement_plan.json and write a pending job plan.",
+    )
+    import_kihachi.add_argument(
+        "--arrangement-plan",
+        required=True,
+        help="Path to KIHACHI's arrangement_plan.json file.",
+    )
+    import_kihachi.add_argument(
+        "--out", required=True, help="Path to write the reviewable job plan JSON."
+    )
+    import_kihachi.add_argument(
+        "--json",
+        action="store_true",
+        help="Report the imported plan as JSON (name, path, step_count).",
+    )
+    import_kihachi.set_defaults(func=_cmd_import_kihachi)
 
     run = sub.add_parser("run", help="Execute every step of a job plan JSON.")
     run.add_argument("--plan", required=True, help="Path to a job plan JSON file.")
