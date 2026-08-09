@@ -125,7 +125,9 @@ python -m abletongpt.cli.jobs run --plan kihachi-job.json
 python -m abletongpt.cli.jobs resume --plan kihachi-job.json
 ```
 
-取り込み対象は既存の`set_tempo`と、基本4操作（`create_track`、`create_midi_clip`、`set_clip_send_envelope`、`copy_session_clip_to_arrangement`）だけです。`import_vocal_take`やデバイスEnvelopeなどが1件でも入った計画は、Liveへ何も送る前に全体を拒否します。
+取り込み対象は既存の`set_tempo`と、基本5操作（`create_track`、`apply_live_instrument_selection`、`create_midi_clip`、`set_clip_send_envelope`、`copy_session_clip_to_arrangement`）だけです。`import_vocal_take`やデバイスEnvelopeなどが1件でも入った計画は、Liveへ何も送る前に全体を拒否します。
+
+`apply_live_instrument_selection`はtrack indexと役割・genre・moodを受け取り、AbletonGPTの既存楽器プランナーがLive純正候補を決めます。実行前にトラックのデバイスを読み、候補と一致する楽器が1台だけなら`resume`として受け入れます。別の楽器は置換しません。ドラムは空のDrum Rack／Impulseを作っても無音なので、実在するキットをBrowserから選ぶ別工程です。
 
 ---
 

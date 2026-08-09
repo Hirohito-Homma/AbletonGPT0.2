@@ -23,6 +23,15 @@ def _document():
                 },
             },
             {
+                "op": "apply_live_instrument_selection",
+                "params": {
+                    "track_index": 0,
+                    "role": "chords",
+                    "genre": "edm",
+                    "mood": "dark",
+                },
+            },
+            {
                 "op": "create_midi_clip",
                 "params": {
                     "track_index": 0,
@@ -71,9 +80,10 @@ def test_converts_the_core_contract_in_order_with_stable_ids():
     assert plan.step_ids == (
         "0000_set_tempo",
         "0001_create_track",
-        "0002_create_midi_clip",
-        "0003_set_clip_send_envelope",
-        "0004_copy_session_clip_to_arrangement",
+        "0002_apply_live_instrument_selection",
+        "0003_create_midi_clip",
+        "0004_set_clip_send_envelope",
+        "0005_copy_session_clip_to_arrangement",
     )
     assert [step.command for step in plan.steps] == [
         operation["op"] for operation in _document()["operations"]
@@ -111,9 +121,17 @@ def test_rejects_non_core_operations_before_returning_a_plan():
 
 def test_preflights_every_step_including_a_late_invalid_send():
     document = copy.deepcopy(_document())
-    document["operations"][3]["params"]["steps"][1]["value"] = 1.1
+    document["operations"][4]["params"]["steps"][1]["value"] = 1.1
 
-    with pytest.raises(InvalidKihachiPlan, match="operation 3.*between 0.0 and 1.0"):
+    with pytest.raises(InvalidKihachiPlan, match="operation 4.*between 0.0 and 1.0"):
+        build_kihachi_job_plan(document)
+
+
+def test_rejects_an_unknown_instrument_role_during_pure_preflight():
+    document = copy.deepcopy(_document())
+    document["operations"][2]["params"]["role"] = "guitar"
+
+    with pytest.raises(InvalidKihachiPlan, match="operation 2.*unsupported instrument role"):
         build_kihachi_job_plan(document)
 
 
