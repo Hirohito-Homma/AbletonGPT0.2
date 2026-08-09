@@ -1,7 +1,7 @@
 """Pure adapter from a KIHACHI arrangement plan to an AbletonGPT job plan.
 
 The adapter is intentionally narrow. It accepts the existing tempo command and the
-five additive core operations needed for a native-instrument-ready MIDI
+six additive core operations needed for a native-instrument-ready MIDI
 arrangement with send throws. Any other operation rejects the *whole* document
 before a real bridge can be opened.
 """
@@ -12,6 +12,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from ..drumkits import ALL_KIT_NAMES
 from .executors import AbletonStepExecutor
 from .models import JobPlan, JobStep
 
@@ -21,6 +22,7 @@ KIHACHI_CORE_COMMANDS = frozenset(
         "set_tempo",
         "create_track",
         "apply_live_instrument_selection",
+        "apply_live_drum_kit",
         "create_midi_clip",
         "set_clip_send_envelope",
         "copy_session_clip_to_arrangement",
@@ -52,6 +54,36 @@ class _ValidationBridge:
             }
             self._devices.setdefault(params["track_index"], []).append(device)
             return {"name": candidate}
+        if command == "browse_presets":
+            # Preflight runs with no Live and therefore no browser. Standing in
+            # every kit the selector can name checks the walk and the load
+            # parameters; whether a given kit is actually installed is a question
+            # only the real browser can answer, and the executor asks it there.
+            if params["path"]:
+                return {"items": []}
+            # ``.adg`` because that is how the real browser reports a preset,
+            # so the preflight exercises the same name normalisation the
+            # executor does against Live rather than an easier fiction.
+            return {
+                "items": [
+                    {"name": name + ".adg", "is_folder": False, "is_loadable": True}
+                    for name in sorted(ALL_KIT_NAMES)
+                ]
+            }
+        if command == "load_preset":
+            # Live names the resulting device after the preset, without the
+            # extension -- which is what the executor's readback compares to.
+            loaded = params["name"]
+            if loaded.lower().endswith(".adg"):
+                loaded = loaded[:-4]
+            device = {
+                "name": loaded,
+                "class_name": "DrumGroupDevice",
+                "class_display_name": "Drum Rack",
+                "type": 1,
+            }
+            self._devices.setdefault(params["track_index"], []).append(device)
+            return {"loaded": params["name"], "verified_single_add": True}
         if command == "create_midi_clip":
             self._clips[(params["track_index"], params["clip_index"])] = {
                 "clip": params["name"],
