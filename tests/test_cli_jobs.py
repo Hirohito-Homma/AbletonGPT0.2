@@ -322,3 +322,98 @@ def test_resume_returns_exit_code_1_on_failure(tmp_path: Path):
 def test_missing_subcommand_is_a_usage_error():
     with pytest.raises(SystemExit):
         main([])
+
+
+# --- track baseline guard ---------------------------------------------------------
+
+class BridgedExecutor(FakeExecutor):
+    """A fake that also offers a bridge, so the preflight guard applies to it."""
+
+    def __init__(self, track_count: int, fail_ids=()):
+        super().__init__(fail_ids)
+        self.bridge = _StateBridge(track_count)
+
+
+class _StateBridge:
+    def __init__(self, track_count: int) -> None:
+        self._state = {"tracks": [{"index": i} for i in range(track_count)]}
+
+    def call(self, command, **params):
+        assert command == "get_state", "the guard must not mutate"
+        return self._state
+
+
+def _track_plan() -> JobPlan:
+    """Two appended tracks, then a clip on the first of them (index 3)."""
+    return JobPlan(
+        name="tracks",
+        steps=(
+            JobStep("00_a", "create_track", {"track_type": "midi", "index": -1}),
+            JobStep("01_b", "create_track", {"track_type": "midi", "index": -1}),
+            JobStep(
+                "02_c",
+                "create_midi_clip",
+                {
+                    "track_index": 3,
+                    "clip_index": 0,
+                    "name": "c",
+                    "length_beats": 4.0,
+                    "notes": [],
+                },
+            ),
+        ),
+    )
+
+
+def test_run_is_refused_without_executing_anything_when_the_set_does_not_match(
+    tmp_path: Path, capsys
+):
+    path = tmp_path / "plan.json"
+    save_job_plan(_track_plan(), path)
+
+    executor = BridgedExecutor(track_count=5)  # plan was written for 3
+    rc = main(["run", "--plan", str(path)], executor_factory=_factory(executor))
+
+    assert rc == 1
+    # the whole point: nothing was touched
+    assert executor.executed == []
+    assert set(load_step_statuses(path).values()) == {StepStatus.PENDING}
+    assert "--first-track-index 5" in capsys.readouterr().err
+
+
+def test_run_proceeds_when_the_set_matches_the_plan(tmp_path: Path):
+    path = tmp_path / "plan.json"
+    save_job_plan(_track_plan(), path)
+
+    executor = BridgedExecutor(track_count=3)
+    rc = main(["run", "--plan", str(path)], executor_factory=_factory(executor))
+
+    assert rc == 0
+    assert executor.executed == ["00_a", "01_b", "02_c"]
+
+
+def test_an_executor_without_a_bridge_is_not_guarded(tmp_path: Path):
+    """Existing fakes cannot be checked, and must keep working unchanged."""
+    path = tmp_path / "plan.json"
+    save_job_plan(_track_plan(), path)
+
+    executor = FakeExecutor()
+    rc = main(["run", "--plan", str(path)], executor_factory=_factory(executor))
+
+    assert rc == 0
+    assert executor.executed == ["00_a", "01_b", "02_c"]
+
+
+def test_resume_is_guarded_against_the_shifted_set(tmp_path: Path, capsys):
+    path = tmp_path / "plan.json"
+    save_job_plan(
+        _track_plan(), path, statuses={"00_a": StepStatus.SUCCEEDED}
+    )
+
+    # one track was created, so a matching Set holds 4; this one drifted to 7
+    executor = BridgedExecutor(track_count=7)
+    rc = main(["resume", "--plan", str(path)], executor_factory=_factory(executor))
+
+    assert rc == 1
+    assert executor.executed == []
+    assert "re-import" in capsys.readouterr().err
