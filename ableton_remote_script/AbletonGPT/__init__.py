@@ -1194,8 +1194,33 @@ class AbletonGPTControlSurface(ControlSurface):
         "user_library",
     )
 
+    @staticmethod
+    def _has_children(item):
+        """Whether a BrowserItem can be descended into, folder or not.
+
+        Guarded because ``children`` is a live query into Live's browser: a
+        stale or unreadable item raises rather than returning an empty list, and
+        an unreadable item is simply one that cannot be descended.
+        """
+        try:
+            return len(item.children) > 0
+        except (AttributeError, TypeError, RuntimeError):
+            return False
+
     def _resolve_browser_node(self, category, path):
-        """Return the BrowserItem at ``category`` descended through ``path`` folder names."""
+        """Return the BrowserItem at ``category`` descended through ``path``.
+
+        A segment matches a folder, or a **device that has children**. Live marks
+        a device entry ``is_folder=False`` even though its presets *are* its
+        children, so the original folders-only rule made every device preset
+        unreachable: the ``audio_effects`` root is flat (55 items, zero folders)
+        with ``Vocoder`` reported as a non-folder, and asking for its presets
+        raised "not found". Drum kits never hit this because they sit loadable
+        directly at the ``drums`` root.
+
+        A folder wins over a non-folder of the same name. Descending is still
+        read-only -- this only decides *where* to look.
+        """
         if category not in self.BROWSER_CATEGORIES:
             raise ValueError("unknown browser category: %s" % category)
         browser = self.application().browser
@@ -1204,12 +1229,22 @@ class AbletonGPTControlSurface(ControlSurface):
             raise ValueError("this Live version has no '%s' browser category" % category)
         for segment in path:
             match = None
+            device_match = None
             for child in node.children:
-                if child.name == segment and child.is_folder:
+                if child.name != segment:
+                    continue
+                if child.is_folder:
                     match = child
                     break
+                if device_match is None and self._has_children(child):
+                    device_match = child
             if match is None:
-                raise ValueError("browser folder not found: %s" % segment)
+                match = device_match
+            if match is None:
+                raise ValueError(
+                    "browser path segment not found (no folder, and no device "
+                    "with presets, named): %s" % segment
+                )
             node = match
         return node
 
@@ -1228,6 +1263,10 @@ class AbletonGPTControlSurface(ControlSurface):
                 {
                     "name": child.name,
                     "is_folder": bool(child.is_folder),
+                    # A device is not a folder but still has presets under it,
+                    # so is_folder alone does not tell a caller what it can
+                    # descend into. This does.
+                    "is_expandable": bool(child.is_folder) or self._has_children(child),
                     "is_loadable": bool(getattr(child, "is_loadable", False)),
                     "is_device": bool(getattr(child, "is_device", False)),
                     "uri": getattr(child, "uri", None),
