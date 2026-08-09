@@ -12,7 +12,7 @@ arrange (アレンジプラン) -> jobs create (ジョブプラン) -> jobs run 
                                               \-> arrange-run（生成→計画→実行を一括）
 ```
 
-`run` / `resume` と、`--dry-run` を付けない `arrange-run` だけがAbleton Liveへ接続します。それ以外（`template` / `create-simple` / `validate` / `create` / `status` / `--dry-run*` / `--describe-*` / `--list-styles`）はすべて**純ロジックで、Live接続もファイル破壊もしません**。
+`run` / `resume` と、`--dry-run` を付けない `arrange-run` だけがAbleton Liveへ接続します。それ以外（`template` / `create-simple` / `validate` / `create` / `import-kihachi` / `status` / `--dry-run*` / `--describe-*` / `--list-styles`）はすべて**純ロジックで、Live接続もファイル破壊もしません**。
 
 すべてのサブコマンドは `--json` を受け付け、機械可読な出力に切り替えられます（後述）。
 
@@ -110,6 +110,22 @@ python -m abletongpt.cli.jobs status --plan plan.json --json
 ```json
 { "completed": 0, "failed": 0, "pending": 5, "total": 5 }
 ```
+
+### KIHACHI計画を取り込む
+
+```bash
+python -m abletongpt.cli.jobs import-kihachi \
+  --arrangement-plan /path/to/project/arrangement_plan.json \
+  --out kihachi-job.json
+
+# JSONを確認してからLiveへ適用
+python -m abletongpt.cli.jobs run --plan kihachi-job.json
+
+# 途中失敗後は成功済みステップを飛ばして再開
+python -m abletongpt.cli.jobs resume --plan kihachi-job.json
+```
+
+取り込み対象は既存の`set_tempo`と、基本4操作（`create_track`、`create_midi_clip`、`set_clip_send_envelope`、`copy_session_clip_to_arrangement`）だけです。`import_vocal_take`やデバイスEnvelopeなどが1件でも入った計画は、Liveへ何も送る前に全体を拒否します。
 
 ---
 

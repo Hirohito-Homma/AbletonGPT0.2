@@ -22,6 +22,13 @@ handling is shared.
 produces "C-KIHACHI Dub", following A-Reverb and B-Delay. There is no delete
 command; removing a return is a manual action in Live.
 
+KIHACHI plans enter through `jobs import-kihachi`, which is a pure preflight: it
+accepts plan version 0.1, `planned_not_applied`, the existing `set_tempo`, and only
+the four additive core operations (`create_track`, `create_midi_clip`,
+`set_clip_send_envelope`, `copy_session_clip_to_arrangement`). The resulting saved
+JobPlan remains pending until a separate `jobs run`/`resume`; unknown operations or
+bad parameters reject the whole import before any Live bridge call.
+
 **Reloading the Remote Script needs a full Live restart.** Re-selecting the
 control surface re-instantiates the class but Python keeps the module in
 `sys.modules`, so the file is never re-read -- confirmed by the file's access
@@ -271,7 +278,7 @@ Script. New tools must uphold them:
 `uv run pytest` runs the whole suite (72 files, ~674 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
-smoke test of every module. Its printed total adds a hardcoded `+ 49` for those import checks, so
+smoke test of every module. Its printed total adds a hardcoded `+ 51` for those import checks, so
 **when you add a module, add it to that list and bump the constant**. Most new test files belong in
 the pytest suite only; wire one into `run_checks.py` just when its checks must survive without dev
 deps.
