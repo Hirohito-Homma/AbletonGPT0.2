@@ -81,7 +81,9 @@ instrument, so an empty Drum Rack — the exact failure this operation exists to
 prevent — would sail through a meter check. That is why the readback here is device
 presence plus a name match, and it must stay that way. (Measuring the master needs a
 settle pause first; reverb/delay tails from a previous playback otherwise read as a
-false positive, which they did once here at 0.32 before a 0.6 s stop was added.) The same function backs both the job step and the `apply_live_drum_kit`
+false positive, which they did once here at 0.32 before a 0.6 s stop was added.)
+
+The same function backs both the job step and the `apply_live_drum_kit`
 MCP tool, so the two paths cannot drift. Safety is doubled up: the handler refuses
 a track holding a different instrument, and the Remote Script's `load_preset`
 refuses an instrument-category load onto an occupied track on its own. A track
@@ -89,6 +91,43 @@ already holding a candidate kit is treated as done, so resume never stacks a sec
 rack. Offline preflight has no browser, so `_ValidationBridge` stands in every name
 `drumkits.ALL_KIT_NAMES` can propose — that checks the walk and the load parameters;
 whether a kit is really installed is a question only the live browser answers.
+
+## The vocoder cannot be wired from here — do not try again
+
+Drums looked like the last gap in the KIHACHI layout, so the obvious next move is to
+give `KIHACHI Vocoder` the same treatment. It does not work, and the reason is Live's
+API rather than a missing feature here. Investigated 2026-08-10 against a running
+Live 12; the KIHACHI-side warning about carrier/modulator routing is **correct and
+should stay**.
+
+A MIDI-driven vocoder needs a synth as the *carrier* and a voice as the *modulator*,
+which means the Vocoder's carrier must be set to **External** and pointed at another
+track. Three independent things block that:
+
+- **The carrier chooser is not in the LOM.** The device exposes 24 parameters, and
+  every per-mode parameter is there (`Noise Rate`/`Noise Crackle` for Noise,
+  `Lower`/`Upper Pitch Detection` + `Oscillator Pitch`/`Waveform` for Pitch Tracking,
+  `Ext. In Gain` for External) — but the selector that picks the mode is absent, so
+  `set_device_parameter` cannot switch it. Device sidechain *routing* has no API at
+  all, so naming the carrier's source track is impossible regardless.
+- **No shipped preset carries External.** The browser-preset trick that solved drum
+  kits (a preset carrying state the parameter API cannot set) does not apply: all
+  seven Core Library Vocoder presets use Noise (`Chromatic`, `Noise Drums`) or
+  Modulator (`Filterbank`, `Formant ±5`, `Octaves Mod`, `Oct+Six Mod`). None uses
+  External.
+- **Device presets are not reachable by the browser tools anyway.** The
+  `audio_effects` root is flat (55 items, zero folders) and `Vocoder` reports
+  `is_folder=false`, while `_resolve_browser_node` only descends items where
+  `is_folder` is true. So `browse_device_presets`/`load_browser_preset` cannot see a
+  preset that lives *under* a device. This is a pre-existing limit unrelated to drum
+  kits, which are all loadable directly at the `drums` root — worth knowing before
+  assuming any device's presets are reachable.
+
+What *is* possible is a different feature, not this one: inserting a Vocoder on a
+vocal **audio** track (Noise/Modulator carrier) already works today via
+`add_native_device`, needs no new code, and has nothing to do with KIHACHI's MIDI
+vocoder part. The carrier a bare insertion lands on cannot be read back, for the
+same reason it cannot be set.
 
 **Reloading the Remote Script needs a full Live restart.** Re-selecting the
 control surface re-instantiates the class but Python keeps the module in
