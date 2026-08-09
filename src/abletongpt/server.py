@@ -2372,7 +2372,9 @@ def browse_device_presets(
 ) -> dict[str, Any]:
     """Liveブラウザの内容を読み取り専用で列挙する。categoryはinstruments/sounds/drums/
     audio_effects/midi_effects/samples/plugins/max_for_live/packs/user_libraryのいずれか。
-    pathでフォルダを1階層ずつ辿る。各項目はname/is_folder/is_loadable/is_device/uri/sourceを返す。
+    pathで1階層ずつ辿る。フォルダに加え、プリセットを持つデバイス名も辿れる
+    (Liveはデバイスをis_folder=falseとして返すため、辿れるかはis_expandableで判断する)。
+    各項目はname/is_folder/is_expandable/is_loadable/is_device/uri/sourceを返す。
     プリセットのロードや挿入は一切行わない。"""
     if category not in _BROWSER_CATEGORIES:
         raise ValueError("category must be one of: %s" % ", ".join(_BROWSER_CATEGORIES))
@@ -2398,7 +2400,8 @@ def load_browser_preset(
     path: list[str] | None = None,
 ) -> dict[str, Any]:
     """browse_device_presetsで見つけたプリセット／キットを、指定トラックへLiveブラウザからロードするMutation。
-    categoryとpath（フォルダ名列）で場所を特定し、そのフォルダ直下のnameという読み込み可能項目をロードする。
+    categoryとpath（フォルダ名、またはプリセットを持つデバイス名の列）で場所を特定し、
+    その直下のnameという読み込み可能項目をロードする。例: path=["Vocoder"]でVocoderのプリセット。
     安全のため、既にインストゥルメントを持つトラックへのロードは拒否する（既存楽器を置き換えない・追加のみ）。
     1回1トラック。まずbrowse_device_presetsでname/pathを確認すること。"""
     if track_index < 0:

@@ -1080,3 +1080,106 @@ def test_a_device_envelope_still_reports_its_own_device_and_parameter():
 
     assert result["device"] == "Echo"
     assert result["parameter"] == "Dry Wet"
+
+
+# --- browser path resolution: folders *and* devices that hold presets ----------
+
+def _browser_surface(root_children):
+    """A surface whose browser has one category root with the given children."""
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    root = _BrowserItem("audio_effects_root", is_folder=True)
+    root.children = list(root_children)
+    surface.application = lambda: types.SimpleNamespace(
+        browser=types.SimpleNamespace(audio_effects=root)
+    )
+    return surface
+
+
+def _device_with_presets(name, preset_names):
+    """Live reports a device as is_folder=False even though its presets are children."""
+    device = _BrowserItem(name, is_folder=False, is_loadable=True)
+    device.children = [_BrowserItem(preset) for preset in preset_names]
+    return device
+
+
+def test_a_device_holding_presets_can_be_descended_even_though_it_is_not_a_folder():
+    vocoder = _device_with_presets("Vocoder", ["Chromatic", "Noise Drums"])
+    surface = _browser_surface([vocoder])
+
+    node = surface._resolve_browser_node("audio_effects", ["Vocoder"])
+
+    assert node is vocoder
+    assert [child.name for child in node.children] == ["Chromatic", "Noise Drums"]
+
+
+def test_a_childless_non_folder_is_still_not_descendable():
+    # A plain preset is a leaf; asking to descend it is a real error.
+    surface = _browser_surface([_BrowserItem("Delay", is_folder=False)])
+
+    try:
+        surface._resolve_browser_node("audio_effects", ["Delay"])
+    except ValueError as exc:
+        assert "not found" in str(exc)
+    else:
+        raise AssertionError("a leaf item must not be descendable")
+
+
+def test_a_folder_wins_over_a_device_of_the_same_name():
+    device = _device_with_presets("Reverb", ["Big Hall"])
+    folder = _BrowserItem("Reverb", is_folder=True)
+    folder.children = [_BrowserItem("My Reverb")]
+    surface = _browser_surface([device, folder])
+
+    assert surface._resolve_browser_node("audio_effects", ["Reverb"]) is folder
+
+
+def test_folder_descent_is_unchanged():
+    inner = _BrowserItem("Bass", is_folder=True)
+    inner.children = [_BrowserItem("Sub")]
+    outer = _BrowserItem("Presets", is_folder=True)
+    outer.children = [inner]
+    surface = _browser_surface([outer])
+
+    assert surface._resolve_browser_node("audio_effects", ["Presets", "Bass"]) is inner
+
+
+def test_an_unreadable_children_query_is_treated_as_not_descendable():
+    """``children`` is a live query; a stale item raises rather than returning []."""
+
+    class _Stale(object):
+        name = "Ghost"
+        is_folder = False
+
+        @property
+        def children(self):
+            raise RuntimeError("stale browser item")
+
+    surface = _browser_surface([_Stale()])
+
+    try:
+        surface._resolve_browser_node("audio_effects", ["Ghost"])
+    except ValueError as exc:
+        assert "not found" in str(exc)
+    else:
+        raise AssertionError("an unreadable item must not be descendable")
+
+
+def test_listing_reports_is_expandable_for_devices_and_folders():
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    vocoder = _device_with_presets("Vocoder", ["Chromatic"])
+    folder = _BrowserItem("Bass", is_folder=True)
+    folder.children = [_BrowserItem("Sub")]
+    leaf = _BrowserItem("Delay", is_folder=False)
+    root = _BrowserItem("root", is_folder=True)
+    root.children = [vocoder, folder, leaf]
+    surface.application = lambda: types.SimpleNamespace(
+        browser=types.SimpleNamespace(audio_effects=root)
+    )
+
+    listing = surface._browse_presets("audio_effects", [], 100)
+    expandable = {item["name"]: item["is_expandable"] for item in listing["items"]}
+
+    assert expandable == {"Vocoder": True, "Bass": True, "Delay": False}
+    assert listing["read_only"] is True

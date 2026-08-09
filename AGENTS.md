@@ -102,7 +102,7 @@ should stay**.
 
 A MIDI-driven vocoder needs a synth as the *carrier* and a voice as the *modulator*,
 which means the Vocoder's carrier must be set to **External** and pointed at another
-track. Three independent things block that:
+track. Two things block that:
 
 - **The carrier chooser is not in the LOM.** The device exposes 24 parameters, and
   every per-mode parameter is there (`Noise Rate`/`Noise Crackle` for Noise,
@@ -115,19 +115,48 @@ track. Three independent things block that:
   seven Core Library Vocoder presets use Noise (`Chromatic`, `Noise Drums`) or
   Modulator (`Filterbank`, `Formant ±5`, `Octaves Mod`, `Oct+Six Mod`). None uses
   External.
-- **Device presets are not reachable by the browser tools anyway.** The
-  `audio_effects` root is flat (55 items, zero folders) and `Vocoder` reports
-  `is_folder=false`, while `_resolve_browser_node` only descends items where
-  `is_folder` is true. So `browse_device_presets`/`load_browser_preset` cannot see a
-  preset that lives *under* a device. This is a pre-existing limit unrelated to drum
-  kits, which are all loadable directly at the `drums` root — worth knowing before
-  assuming any device's presets are reachable.
+A third blocker — that device presets were unreachable at all — used to be listed
+here and **has since been fixed**; see the browser section below. That fix does not
+change the conclusion, because no preset carries External either way.
 
-What *is* possible is a different feature, not this one: inserting a Vocoder on a
-vocal **audio** track (Noise/Modulator carrier) already works today via
-`add_native_device`, needs no new code, and has nothing to do with KIHACHI's MIDI
-vocoder part. The carrier a bare insertion lands on cannot be read back, for the
-same reason it cannot be set.
+What *is* possible is a different feature, not this one: a vocoder on a vocal
+**audio** track. Either `add_native_device("Vocoder")`, or now
+`load_browser_preset(category="audio_effects", path=["Vocoder"], name="Chromatic.adv")`
+— verified loading onto an audio track with `added_device_count: 1`. Loading a preset
+is in fact the only way to *choose* the carrier, since the chooser is not a
+parameter: `Chromatic`/`Noise Drums` land on Noise, the other five on Modulator. None
+of this drives KIHACHI's MIDI vocoder part, which still needs External. The carrier a
+bare insertion lands on cannot be read back, for the same reason it cannot be set.
+
+## Browsing: a device is not a folder, but you can still descend into it
+
+`_resolve_browser_node` descends a path segment into a folder **or into a device that
+has children**. Live reports a device entry as `is_folder=false` even though its
+presets *are* its `children`, so the original folders-only rule made every device
+preset unreachable — the `audio_effects` root is flat (55 items, zero folders) and
+asking for `path=["Vocoder"]` raised "not found". Drum kits never hit this because
+they sit loadable directly at the `drums` root, which is why it went unnoticed.
+
+Verified against a running Live 12 after the fix: `path=["Vocoder"]` lists all seven
+presets, and `load_browser_preset(..., path=["Vocoder"], name="Chromatic.adv")` loads
+one (`added_device_count: 1`). 45 of the 55 `audio_effects` root items are devices
+with presets.
+
+Three rules keep this safe, and each is tested:
+
+- **A folder wins over a non-folder of the same name**, so a user's own `Reverb`
+  folder is never mistaken for the stock `Reverb` device.
+- **A childless non-folder is still refused.** A preset is a leaf; descending one is a
+  real error and must not silently resolve to something else.
+- **`children` is read through a guard.** It is a live query into Live's browser, and
+  a stale item *raises* rather than returning an empty list. Unreadable means
+  not-descendable, not a crash.
+
+Listings now also carry `is_expandable` (folder, or device with children), because
+`is_folder` alone does not tell a caller what it can descend into. The drum-kit walk
+in `jobs/executors.py` deliberately still recurses on `is_folder` only: kits are all
+at the `drums` root, and following `is_expandable` there would walk back into the
+7689-item `Drum Hits` subtree it was optimised out of.
 
 **Reloading the Remote Script needs a full Live restart.** Re-selecting the
 control surface re-instantiates the class but Python keeps the module in
@@ -135,7 +164,11 @@ control surface re-instantiates the class but Python keeps the module in
 time not moving. The script is installed in *two* places on this machine and both
 have to be updated:
 `~/Music/Ableton/User Library/Remote Scripts/AbletonGPT_MCP/` and the same path
-under the external drive's `12.4b` User Library. Delete `__pycache__` in both.
+under the external drive's `12.４b` User Library — that is
+`/Volumes/NO NAME/12.４b/...`, and the `４` is **full-width**, so a copied-and-pasted
+half-width `12.4b` will not match. Delete `__pycache__` in both (only the external
+copy tends to have one).
+
 ## Commands
 
 ```bash
