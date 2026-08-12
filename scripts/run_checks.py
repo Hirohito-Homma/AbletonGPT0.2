@@ -32,7 +32,33 @@ def main() -> None:
             failures.append((name, exc))
             print("FAIL %s: %s" % (name, exc))
 
-    for module_name in (
+    for module_name in _IMPORT_CHECKS:
+        try:
+            __import__(module_name)
+            print("PASS import %s" % module_name)
+        except Exception as exc:
+            failures.append(("import %s" % module_name, exc))
+            print("FAIL import %s: %s" % (module_name, exc))
+
+    if importlib.util.find_spec("mcp") is None:
+        failures.append(("dependency mcp", RuntimeError("mcp package is missing")))
+        print("FAIL dependency mcp: package is missing")
+    else:
+        print("PASS dependency mcp")
+
+    # Counted, not remembered. Two branches each added a module and each bumped a
+    # hardcoded total to the same number; merged, the printed count was one short
+    # of the checks that actually ran.
+    print(
+        "\n%d checks, %d failures"
+        % (len(tests) + len(_IMPORT_CHECKS) + _DEPENDENCY_CHECKS, len(failures))
+    )
+    raise SystemExit(1 if failures else 0)
+
+
+#: Every module that must import on a base install. Add one here and nothing else
+#: needs updating -- the printed total is derived from this tuple.
+_IMPORT_CHECKS = (
         "abletongpt.arrange.presets",
         "abletongpt.audio",
         "abletongpt.backends",
@@ -91,22 +117,10 @@ def main() -> None:
         "abletongpt.transpose",
         "abletongpt.vocal",
         "abletongpt.warp",
-    ):
-        try:
-            __import__(module_name)
-            print("PASS import %s" % module_name)
-        except Exception as exc:
-            failures.append(("import %s" % module_name, exc))
-            print("FAIL import %s: %s" % (module_name, exc))
+)
 
-    if importlib.util.find_spec("mcp") is None:
-        failures.append(("dependency mcp", RuntimeError("mcp package is missing")))
-        print("FAIL dependency mcp: package is missing")
-    else:
-        print("PASS dependency mcp")
-
-    print("\n%d checks, %d failures" % (len(tests) + 58, len(failures)))
-    raise SystemExit(1 if failures else 0)
+#: The `mcp` dependency probe, which is not a module import.
+_DEPENDENCY_CHECKS = 1
 
 
 if __name__ == "__main__":

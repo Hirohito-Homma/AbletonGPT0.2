@@ -456,7 +456,8 @@ Script. New tools must uphold them:
 `uv run pytest` runs the whole suite (81 files, ~813 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
-smoke test of every module. Its printed total adds a hardcoded `+ 57` for those import checks, so
-**when you add a module, add it to that list and bump the constant**. Most new test files belong in
-the pytest suite only; wire one into `run_checks.py` just when its checks must survive without dev
-deps.
+smoke test of every module. **When you add a module, add it to `_IMPORT_CHECKS`** -- and nothing
+else: the printed total is derived from that tuple's length rather than a hardcoded constant. It
+used to be hardcoded, and two branches that each added a module each bumped it to the same number,
+so the merged script reported one fewer check than it ran. Most new test files belong in the pytest
+suite only; wire one into `run_checks.py` just when its checks must survive without dev deps.
