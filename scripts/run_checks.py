@@ -43,9 +43,12 @@ def main() -> None:
         "abletongpt.cli.contextual",
         "abletongpt.cli.expression",
         "abletongpt.cli.instruments",
+        "abletongpt.cli.intent",
         "abletongpt.cli.jobs",
+        "abletongpt.cli.live_flow",
         "abletongpt.cli.main",
         "abletongpt.cli.serialization",
+        "abletongpt.cli.ui",
         "abletongpt.cli.vocal",
         "abletongpt.composition",
         "abletongpt.config",
@@ -79,6 +82,7 @@ def main() -> None:
         "abletongpt.scale",
         "abletongpt.server",
         "abletongpt.snapshots",
+        "abletongpt.songspec",
         "abletongpt.targets",
         "abletongpt.timescale",
         "abletongpt.transcription",
@@ -99,7 +103,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 53, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 57, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 
