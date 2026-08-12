@@ -49,6 +49,54 @@ GENRE_PROFILES = {
         "hat_pitch": 42,
         "drum_velocity": 1.06,
     },
+    "tech_house": {
+        "bass_step": 0.5,
+        "kick": [0.0, 1.0, 2.0, 3.0],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.25,
+        "hat_pitch": 42,
+        "drum_velocity": 1.03,
+    },
+    "dub_techno": {
+        "bass_step": 1.0,
+        "kick": [0.0, 2.0],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.5,
+        "hat_pitch": 51,
+        "drum_velocity": 0.84,
+    },
+    "deep_house": {
+        "bass_step": 0.5,
+        "kick": [0.0, 1.0, 2.0, 3.0],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.5,
+        "hat_pitch": 42,
+        "drum_velocity": 0.94,
+    },
+    "minimal_techno": {
+        "bass_step": 1.0,
+        "kick": [0.0, 1.0, 2.0, 3.0],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.5,
+        "hat_pitch": 42,
+        "drum_velocity": 0.88,
+    },
+    "dub": {
+        "bass_step": 1.0,
+        "kick": [0.0, 2.0],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.5,
+        "hat_pitch": 42,
+        "drum_velocity": 0.86,
+    },
+    "funk": {
+        "bass_step": 0.5,
+        "kick": [0.0, 1.5, 2.5],
+        "snare": [1.0, 3.0],
+        "hat_step": 0.25,
+        "hat_pitch": 42,
+        "drum_velocity": 1.0,
+    },
     "hiphop": {
         "bass_step": 2.0,
         "kick": [0.0, 1.75, 2.5],
@@ -81,6 +129,11 @@ GENRE_PROFILES = {
         "hat_pitch": 42,
         "drum_velocity": 0.72,
     },
+}
+
+GENRE_ALIASES = {
+    "techhouse": "tech_house",
+    "dubtechno": "dub_techno",
 }
 
 CHORD_SIZES = {"triad": 3, "seventh": 4, "ninth": 5}
@@ -118,6 +171,8 @@ def build_song_plan(
     humanize: float = 0.0,
     seed: int = 0,
 ) -> dict[str, Any]:
+    requested_genre = genre
+    genre = normalize_genre(genre)
     _validate_options(
         genre, mood, key, mode, tempo, bars, progression, chord_complexity,
         harmonic_rhythm_beats, melody_density, swing, humanize,
@@ -227,6 +282,7 @@ def build_song_plan(
         "chord_roots": chord_roots,
         "professional_settings": {
             "genre": genre,
+            "requested_genre": requested_genre,
             "mood": mood,
             "progression_degrees": [degree + 1 for degree in degrees],
             "chord_complexity": chord_complexity,
@@ -248,6 +304,13 @@ def build_song_plan(
             "seedを変えると、同じ設定を保ったまま別のメロディ案を作れます。",
         ],
     }
+
+
+def normalize_genre(genre: str) -> str:
+    normalized = str(genre).strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in GENRE_PROFILES:
+        return normalized
+    return GENRE_ALIASES.get(normalized, normalized)
 
 
 def _validate_options(
@@ -272,8 +335,8 @@ def _validate_options(
         raise ValueError("genre must be pop, rock, edm, hiphop, rnb, jazz, or lofi")
     if mood not in MOOD_PROGRESSIONS:
         raise ValueError("mood must be bright, uplifting, chill, dark, bittersweet, or tense")
-    if bars not in {4, 8, 16, 32}:
-        raise ValueError("bars must be 4, 8, 16, or 32")
+    if bars not in {4, 8, 16, 32, 64}:
+        raise ValueError("bars must be 4, 8, 16, 32, or 64")
     if not 40 <= tempo <= 240:
         raise ValueError("tempo must be between 40 and 240")
     if progression is not None and (not progression or any(d < 1 or d > 7 for d in progression)):

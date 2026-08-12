@@ -206,6 +206,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 "tempo": float(song.tempo),
                 "signature": [int(song.signature_numerator), int(song.signature_denominator)],
                 "scene_count": len(song.scenes),
+                "scenes": [scene.name for scene in song.scenes],
                 "tracks": [
                     {
                         "index": i,
@@ -219,6 +220,14 @@ class AbletonGPTControlSurface(ControlSurface):
                     for i, track in enumerate(song.tracks)
                 ],
             }
+        if command == "set_clip_envelope":
+            return self._set_clip_envelope(song, params)
+        if command == "get_transport_state":
+            return self._get_transport_state(song)
+        if command == "jump_transport":
+            return self._jump_transport(song, params)
+        if command == "toggle_cue_at_playhead":
+            return self._toggle_cue_at_playhead(song, params)
         if command == "get_mix_snapshot":
             return {
                 "tracks": [self._mix_state(index, track) for index, track in enumerate(song.tracks)],
@@ -674,6 +683,49 @@ class AbletonGPTControlSurface(ControlSurface):
             track = self._track(song, params["track_index"])
             track.mixer_device.volume.value = float(params["volume"])
             return {"track": track.name, "volume": float(track.mixer_device.volume.value)}
+        if command == "set_track_send":
+            track = self._track(song, params["track_index"])
+            sends = track.mixer_device.sends
+            send_index = int(params["send_index"])
+            if send_index < 0 or send_index >= len(sends):
+                raise ValueError(
+                    "send_index %d is out of range; this set has %d return track(s)"
+                    % (send_index, len(sends))
+                )
+            send = sends[send_index]
+            if not send.is_enabled:
+                raise ValueError("send is currently locked or macro-controlled")
+            value = float(params["value"])
+            if params.get("normalized", True):
+                value = float(send.min) + value * (float(send.max) - float(send.min))
+            if value < float(send.min) or value > float(send.max):
+                raise ValueError("send value out of range")
+            send.value = value
+            return {
+                "track": track.name,
+                "send_index": send_index,
+                "value": float(send.value),
+                "display_value": str(send),
+                "return_track": (
+                    song.return_tracks[send_index].name
+                    if send_index < len(song.return_tracks)
+                    else None
+                ),
+            }
+        if command == "create_return_track":
+            # Live's default set already ships A-Reverb and B-Delay, so this is
+            # for adding to them rather than for getting started.
+            before = len(song.return_tracks)
+            song.create_return_track()
+            created = song.return_tracks[-1]
+            name = params.get("name")
+            if name:
+                created.name = str(name)[:200]
+            return {
+                "created_index": before,
+                "name": created.name,
+                "return_track_count": len(song.return_tracks),
+            }
         if command == "set_track_pan":
             track = self._track(song, params["track_index"])
             track.mixer_device.panning.value = float(params["pan"])
@@ -883,6 +935,13 @@ class AbletonGPTControlSurface(ControlSurface):
                 track_indices = [int(value) for value in raw_track_indices]
                 if len(set(track_indices)) != len(track_indices):
                     raise ValueError("track_indices must not contain duplicates")
+            raw_expected_length = params.get("expected_length_beats")
+            if raw_expected_length is None:
+                expected_length_beats = None
+            else:
+                expected_length_beats = float(raw_expected_length)
+                if expected_length_beats <= 0:
+                    raise ValueError("expected_length_beats must be positive")
 
             # Preflight every target before changing the Arrangement. If any
             # track overlaps or is unsupported, nothing is copied.
@@ -894,6 +953,17 @@ class AbletonGPTControlSurface(ControlSurface):
                 if not slot.has_clip:
                     skipped_empty_tracks.append(track_index)
                     continue
+                # A copy takes the source clip's own length; Live offers no way to
+                # stretch it on the way in. So a caller that asked for a specific
+                # length is refused here, before anything is written, rather than
+                # silently given whatever the scene happens to be.
+                if expected_length_beats is not None:
+                    actual_length = float(slot.clip.length)
+                    if abs(actual_length - expected_length_beats) > 1e-6:
+                        raise ValueError(
+                            "scene clip on track %d is %g beats, not the requested %g"
+                            % (track_index, actual_length, expected_length_beats)
+                        )
                 prepared = self._prepare_arrangement_copy(
                     track_index,
                     track,
@@ -1125,6 +1195,11 @@ class AbletonGPTControlSurface(ControlSurface):
 
     #: Top-level Live browser roots we allow enumerating. Each name is a BrowserItem
     #: attribute on ``Application.browser``. Read-only browsing only -- never loads.
+    # Categories that cannot possibly contain an instrument. Loading one of these
+    # onto a track that already has an instrument is additive by construction, so
+    # the "never replace an instrument" guard does not apply to them.
+    EFFECT_ONLY_CATEGORIES = ("audio_effects", "midi_effects")
+
     BROWSER_CATEGORIES = (
         "instruments",
         "sounds",
@@ -1138,8 +1213,33 @@ class AbletonGPTControlSurface(ControlSurface):
         "user_library",
     )
 
+    @staticmethod
+    def _has_children(item):
+        """Whether a BrowserItem can be descended into, folder or not.
+
+        Guarded because ``children`` is a live query into Live's browser: a
+        stale or unreadable item raises rather than returning an empty list, and
+        an unreadable item is simply one that cannot be descended.
+        """
+        try:
+            return len(item.children) > 0
+        except (AttributeError, TypeError, RuntimeError):
+            return False
+
     def _resolve_browser_node(self, category, path):
-        """Return the BrowserItem at ``category`` descended through ``path`` folder names."""
+        """Return the BrowserItem at ``category`` descended through ``path``.
+
+        A segment matches a folder, or a **device that has children**. Live marks
+        a device entry ``is_folder=False`` even though its presets *are* its
+        children, so the original folders-only rule made every device preset
+        unreachable: the ``audio_effects`` root is flat (55 items, zero folders)
+        with ``Vocoder`` reported as a non-folder, and asking for its presets
+        raised "not found". Drum kits never hit this because they sit loadable
+        directly at the ``drums`` root.
+
+        A folder wins over a non-folder of the same name. Descending is still
+        read-only -- this only decides *where* to look.
+        """
         if category not in self.BROWSER_CATEGORIES:
             raise ValueError("unknown browser category: %s" % category)
         browser = self.application().browser
@@ -1148,12 +1248,22 @@ class AbletonGPTControlSurface(ControlSurface):
             raise ValueError("this Live version has no '%s' browser category" % category)
         for segment in path:
             match = None
+            device_match = None
             for child in node.children:
-                if child.name == segment and child.is_folder:
+                if child.name != segment:
+                    continue
+                if child.is_folder:
                     match = child
                     break
+                if device_match is None and self._has_children(child):
+                    device_match = child
             if match is None:
-                raise ValueError("browser folder not found: %s" % segment)
+                match = device_match
+            if match is None:
+                raise ValueError(
+                    "browser path segment not found (no folder, and no device "
+                    "with presets, named): %s" % segment
+                )
             node = match
         return node
 
@@ -1172,6 +1282,10 @@ class AbletonGPTControlSurface(ControlSurface):
                 {
                     "name": child.name,
                     "is_folder": bool(child.is_folder),
+                    # A device is not a folder but still has presets under it,
+                    # so is_folder alone does not tell a caller what it can
+                    # descend into. This does.
+                    "is_expandable": bool(child.is_folder) or self._has_children(child),
                     "is_loadable": bool(getattr(child, "is_loadable", False)),
                     "is_device": bool(getattr(child, "is_device", False)),
                     "uri": getattr(child, "uri", None),
@@ -1201,12 +1315,19 @@ class AbletonGPTControlSurface(ControlSurface):
         if not getattr(target, "is_loadable", False):
             raise ValueError("browser item is not loadable: %s" % name)
 
-        # Safety: never load onto a track that already has an instrument. Loading an
-        # instrument preset there could replace the existing one (a destructive change);
-        # refusing keeps every load strictly additive, mirroring add_native_device.
-        if any(self._is_instrument(device) for device in track.devices):
+        # Safety: never let a load replace an existing instrument. An instrument
+        # preset dropped on a track that already has one would do exactly that, so
+        # those stay refused. Effect categories cannot contain an instrument, so
+        # loading one is additive by construction -- refusing them too (as this
+        # once did) made it impossible to put a delay after a synth, which is
+        # ordinary signal-chain work and destroys nothing.
+        if category not in self.EFFECT_ONLY_CATEGORIES and any(
+            self._is_instrument(device) for device in track.devices
+        ):
             raise ValueError(
-                "target track already contains an instrument; refusing to load onto it"
+                "target track already contains an instrument; refusing to load a "
+                "'%s' item onto it (audio_effects and midi_effects are allowed)"
+                % category
             )
 
         before_count = len(track.devices)
@@ -1267,6 +1388,235 @@ class AbletonGPTControlSurface(ControlSurface):
             "read_only": True,
         }
 
+    def _jump_transport(self, song, params):
+        """Move the Arrangement transport to ``time``.
+
+        Live applies a transport move on a LATER tick: reading
+        ``current_song_time`` back inside this same command still returns the old
+        position (measured on Live 12.4). Callers must therefore observe the
+        result with a *separate* command -- see ``_toggle_cue_at_playhead``.
+        """
+        time = float(params["time"])
+        if time < 0:
+            raise ValueError("transport time must be non-negative")
+        before = float(song.current_song_time)
+        delta = time - before
+        if abs(delta) > 1e-9:
+            song.jump_by(delta)
+        return {
+            "requested": time,
+            "before": before,
+            "note": "Live applies the move on a later tick; confirm with get_transport_state",
+        }
+
+    def _toggle_cue_at_playhead(self, song, params):
+        """Create a cue at the CURRENT playhead, or refuse. Never moves the transport.
+
+        ``set_or_delete_cue`` is a toggle and is the only way Live exposes cue
+        creation, so calling it from the wrong position deletes an existing
+        locator instead of adding one. This refuses unless the transport is
+        already where the caller expects, which is why moving is a separate
+        command run on an earlier tick.
+        """
+        expected = float(params["expected_time"])
+        name = str(params.get("name", ""))[:100]
+        epsilon = 1e-4
+
+        actual = float(song.current_song_time)
+        if abs(actual - expected) > epsilon:
+            return {
+                "created": False,
+                "time": actual,
+                "reason": "transport is at %g, expected %g" % (actual, expected),
+            }
+
+        before_times = [float(cue.time) for cue in song.cue_points]
+        if any(abs(existing - expected) <= epsilon for existing in before_times):
+            return {"created": False, "time": expected, "reason": "cue already exists"}
+
+        song.set_or_delete_cue()
+        after = list(song.cue_points)
+        if len(after) != len(before_times) + 1:
+            return {"created": False, "time": expected, "reason": "cue was not created"}
+
+        new_cue = None
+        for cue in after:
+            cue_time = float(cue.time)
+            if all(abs(cue_time - old) > epsilon for old in before_times):
+                new_cue = cue
+                break
+        if new_cue is not None and name:
+            try:
+                new_cue.name = name
+            except Exception:
+                pass
+        return {
+            "created": True,
+            "time": float(new_cue.time) if new_cue is not None else expected,
+            "name": name,
+        }
+
+    MAX_ENVELOPE_STEPS = 512
+
+    def _set_clip_envelope(self, song, params):
+        """Write a step envelope for one parameter onto a **Session** clip.
+
+        The target is a device-chain parameter (``device_index`` +
+        ``parameter_index``) or a mixer send (``send_index``).
+
+        Clip envelopes are a Session-clip feature: Live documents
+        ``automation_envelope`` as "Returns None for Arrangement clips", and there
+        is no Live API for writing Arrangement automation lanes. So this refuses
+        anything but a Session clip slot rather than silently writing nothing.
+
+        Steps are ``{start, length, value}`` in the clip's own beat time. Values
+        are range-checked against the parameter before anything is written, and
+        the result reports ``value_at_time`` read back at each step start so the
+        caller can confirm the write landed instead of assuming it.
+        """
+        track = self._track(song, params["track_index"])
+        clip_index = int(params["clip_index"])
+        if clip_index < 0 or clip_index >= len(track.clip_slots):
+            raise IndexError("clip index out of range")
+        slot = track.clip_slots[clip_index]
+        if not slot.has_clip:
+            raise ValueError("clip slot is empty")
+        clip = slot.clip
+
+        # Two kinds of target, one writer. A send lives on the mixer rather than
+        # in the device chain, so `_parameter` cannot reach it -- but it is the
+        # same DeviceParameter type, and Live gives clip envelopes for both. A
+        # dub delay throw is send automation, which is why this branch exists.
+        if params.get("send_index") is not None:
+            sends = track.mixer_device.sends
+            send_index = int(params["send_index"])
+            if send_index < 0 or send_index >= len(sends):
+                raise ValueError(
+                    "send_index %d is out of range; this set has %d return track(s)"
+                    % (send_index, len(sends))
+                )
+            parameter = sends[send_index]
+            target_name = "Send %s" % chr(ord("A") + send_index)
+            device_name = "Mixer"
+        else:
+            parameter, device = self._parameter(
+                song, params["track_index"], params["device_index"], params["parameter_index"]
+            )
+            target_name = parameter.name
+            device_name = device.name
+        if not parameter.is_enabled:
+            raise ValueError("parameter is currently locked or macro-controlled")
+
+        steps = params.get("steps", [])
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("steps must be a non-empty list")
+        if len(steps) > self.MAX_ENVELOPE_STEPS:
+            raise ValueError("too many steps (max %d per call)" % self.MAX_ENVELOPE_STEPS)
+
+        minimum = float(parameter.min)
+        maximum = float(parameter.max)
+        prepared = []
+        for step in steps:
+            start = float(step["start"])
+            length = float(step["length"])
+            value = float(step["value"])
+            if start < 0:
+                raise ValueError("step start must be non-negative")
+            if length <= 0:
+                raise ValueError("step length must be positive")
+            if value < minimum or value > maximum:
+                raise ValueError("step value out of range for this parameter")
+            prepared.append((start, length, value))
+
+        envelope = clip.automation_envelope(parameter)
+        if envelope is None:
+            envelope = clip.create_automation_envelope(parameter)
+        if envelope is None:
+            raise ValueError(
+                "Live did not provide an envelope for this parameter "
+                "(clip envelopes exist on Session clips only)"
+            )
+
+        for start, length, value in prepared:
+            envelope.insert_step(start, length, value)
+
+        # Verify in the MIDDLE of each step, not at its start: value_at_time is
+        # left-continuous, so sampling exactly on a boundary returns the value of
+        # the step that *ends* there. Reading at the boundary made a correct write
+        # look like an off-by-one failure. The boundary sample is kept alongside
+        # because it is what a caller sees when steps abut.
+        written = []
+        for start, length, value in prepared:
+            def sample(time):
+                try:
+                    return float(envelope.value_at_time(time))
+                except Exception:
+                    return None
+
+            middle = sample(start + length / 2.0)
+            written.append(
+                {
+                    "start": start,
+                    "length": length,
+                    "requested": value,
+                    "value_at_time": middle,
+                    "value_at_step_start": sample(start),
+                    "matches": middle is not None and abs(middle - value) < 1e-3,
+                }
+            )
+        return {
+            "track": track.name,
+            "clip": clip.name,
+            "device": device_name,
+            "parameter": target_name,
+            "parameter_min": minimum,
+            "parameter_max": maximum,
+            "step_count": len(written),
+            "verified_step_count": sum(1 for step in written if step["matches"]),
+            "steps": written,
+        }
+
+    def _get_transport_state(self, song):
+        """Read-only snapshot of the Arrangement transport and its locators.
+
+        Diagnostic. Changes nothing: no property is written and no cue is
+        touched. Locator placement has to move the transport and then toggle a
+        cue at it, so when that misbehaves this is what tells you which of
+        ``current_song_time`` / ``start_time`` actually moved, whether a loop or
+        the song length is constraining it, and what cues already exist.
+        """
+        cues = []
+        for cue in song.cue_points:
+            try:
+                cue_name = str(cue.name)
+            except Exception:
+                cue_name = ""
+            cues.append({"time": float(cue.time), "name": cue_name})
+        cues.sort(key=lambda item: item["time"])
+
+        state = {
+            "current_song_time": float(song.current_song_time),
+            "is_playing": bool(song.is_playing),
+            "tempo": float(song.tempo),
+            "cue_points": cues,
+            "cue_count": len(cues),
+            "read_only": True,
+        }
+        # These are not present on every Live version; report null rather than failing.
+        for name, cast in (
+            ("start_time", float),
+            ("song_length", float),
+            ("loop", bool),
+            ("loop_start", float),
+            ("loop_length", float),
+            ("back_to_arranger", bool),
+        ):
+            try:
+                state[name] = cast(getattr(song, name))
+            except Exception:
+                state[name] = None
+        return state
+
     def _add_locators(self, song, locators):
         """Add named Arrangement locators (cue points) at the given beat positions.
 
@@ -1280,6 +1630,8 @@ class AbletonGPTControlSurface(ControlSurface):
             raise ValueError("too many locators (max 256 per call)")
 
         epsilon = 1e-4
+        # Restore both: the stopped playhead is start_time, the playing one is
+        # current_song_time, and this must not leave the transport moved.
         original_time = song.current_song_time
         created = []
         skipped = []
@@ -1295,7 +1647,30 @@ class AbletonGPTControlSurface(ControlSurface):
                     skipped.append({"time": time, "name": name, "reason": "cue already exists"})
                     continue
 
-                song.current_song_time = time
+                # set_or_delete_cue() acts on `current_song_time`. Assigning to
+                # that property does not move the transport here -- cues kept
+                # landing wherever it was parked -- and assigning to `start_time`
+                # moves the start marker instead: it read back correctly while
+                # the cue still appeared at the old position. jump_by is Live's
+                # documented way to "set a new playing pos, relative to the
+                # current one", so move relatively and then verify.
+                delta = time - float(song.current_song_time)
+                if abs(delta) > epsilon:
+                    song.jump_by(delta)
+
+                # TOGGLE GUARD: set_or_delete_cue() deletes when a cue already
+                # sits at the playhead, so calling it from the wrong position
+                # would silently remove someone else's locator. Never toggle
+                # unless the transport actually arrived.
+                actual_playhead = float(song.current_song_time)
+                if abs(actual_playhead - time) > epsilon:
+                    skipped.append({
+                        "time": time,
+                        "name": name,
+                        "reason": "transport stayed at %g instead of %g; refusing to "
+                        "toggle a cue from the wrong position" % (actual_playhead, time),
+                    })
+                    continue
                 song.set_or_delete_cue()
                 after = list(song.cue_points)
                 if len(after) != len(before_times) + 1:
@@ -1316,7 +1691,9 @@ class AbletonGPTControlSurface(ControlSurface):
                         pass
                 created.append({"time": actual_time, "name": name})
         finally:
-            song.current_song_time = original_time
+            restore_delta = original_time - float(song.current_song_time)
+            if abs(restore_delta) > epsilon:
+                song.jump_by(restore_delta)
 
         return {
             "created": created,

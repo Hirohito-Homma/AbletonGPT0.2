@@ -24,6 +24,8 @@ _MELODY = {
 class FakeBridge:
     def __init__(self):
         self.calls: list[tuple[str, dict]] = []
+        self._time = 0.0
+        self.cues: list[dict] = []
 
     def call(self, command: str, **params):
         self.calls.append((command, params))
@@ -31,9 +33,21 @@ class FakeBridge:
             return {"track_index": params["track_index"], "clip_index": params["clip_index"],
                     "name": params["name"], "length_beats": params["length_beats"],
                     "note_count": len(params["notes"])}
-        if command == "add_locators":
-            return {"created": params["locators"], "created_count": len(params["locators"]),
-                    "skipped": [], "skipped_count": 0, "total_cue_points": len(params["locators"])}
+        # Locator placement is tick-separated: Live applies a transport move on a
+        # later tick, so the move, the confirmation and the cue toggle are three
+        # separate commands. This fake reproduces that ordering.
+        if command == "get_transport_state":
+            return {"current_song_time": self._time, "cue_points": list(self.cues),
+                    "cue_count": len(self.cues), "read_only": True}
+        if command == "jump_transport":
+            self._time = float(params["time"])
+            return {"requested": params["time"], "before": self._time}
+        if command == "toggle_cue_at_playhead":
+            expected = float(params["expected_time"])
+            if abs(self._time - expected) > 1e-4:
+                return {"created": False, "time": self._time, "reason": "wrong position"}
+            self.cues.append({"time": expected, "name": params.get("name", "")})
+            return {"created": True, "time": expected, "name": params.get("name", "")}
         raise AssertionError("unexpected bridge command: %s" % command)
 
 
@@ -161,11 +175,16 @@ def test_plan_locators_is_read_only(fake_bridge):
     assert fake_bridge.calls == []
 
 
-def test_create_locators_issues_one_add_locators(fake_bridge):
+def test_create_locators_places_each_cue_on_its_own_tick(fake_bridge):
     result = server.create_arrangement_locators_from_structure("song.wav", tempo=120.0)
 
-    assert [command for command, _ in fake_bridge.calls] == ["add_locators"]
-    _command, params = fake_bridge.calls[0]
-    assert params["locators"] == [{"time": 0.0, "name": "1 A"}, {"time": 10.0, "name": "2 B"}]
+    assert fake_bridge.cues == [{"time": 0.0, "name": "1 A"}, {"time": 10.0, "name": "2 B"}]
+    assert result["created_count"] == 2
     assert result["source"] == "audio_structure"
     assert result["planned_count"] == 2
+    # every toggle is preceded by a move and a confirmation read
+    commands = [command for command, _ in fake_bridge.calls]
+    for index, command in enumerate(commands):
+        if command == "toggle_cue_at_playhead":
+            assert commands[index - 1] == "get_transport_state"
+            assert commands[index - 2] == "jump_transport"
