@@ -935,6 +935,13 @@ class AbletonGPTControlSurface(ControlSurface):
                 track_indices = [int(value) for value in raw_track_indices]
                 if len(set(track_indices)) != len(track_indices):
                     raise ValueError("track_indices must not contain duplicates")
+            raw_expected_length = params.get("expected_length_beats")
+            if raw_expected_length is None:
+                expected_length_beats = None
+            else:
+                expected_length_beats = float(raw_expected_length)
+                if expected_length_beats <= 0:
+                    raise ValueError("expected_length_beats must be positive")
 
             # Preflight every target before changing the Arrangement. If any
             # track overlaps or is unsupported, nothing is copied.
@@ -946,6 +953,17 @@ class AbletonGPTControlSurface(ControlSurface):
                 if not slot.has_clip:
                     skipped_empty_tracks.append(track_index)
                     continue
+                # A copy takes the source clip's own length; Live offers no way to
+                # stretch it on the way in. So a caller that asked for a specific
+                # length is refused here, before anything is written, rather than
+                # silently given whatever the scene happens to be.
+                if expected_length_beats is not None:
+                    actual_length = float(slot.clip.length)
+                    if abs(actual_length - expected_length_beats) > 1e-6:
+                        raise ValueError(
+                            "scene clip on track %d is %g beats, not the requested %g"
+                            % (track_index, actual_length, expected_length_beats)
+                        )
                 prepared = self._prepare_arrangement_copy(
                     track_index,
                     track,

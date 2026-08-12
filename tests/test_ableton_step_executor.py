@@ -266,6 +266,9 @@ def test_place_scene_uses_scene_name_to_copy_scene_to_arrangement():
                 "scene_index": 1,
                 "destination_time_beats": 16.0,
                 "track_indices": None,
+                # A copy carries the source clip's length, so the requested length
+                # travels as an assertion the Remote Script preflights.
+                "expected_length_beats": 32.0,
             },
         ),
     ]

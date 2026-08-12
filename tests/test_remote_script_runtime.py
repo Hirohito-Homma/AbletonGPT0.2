@@ -1183,3 +1183,96 @@ def test_listing_reports_is_expandable_for_devices_and_folders():
 
     assert expandable == {"Vocoder": True, "Bass": True, "Delay": False}
     assert listing["read_only"] is True
+
+
+class _SceneClipSlot:
+    def __init__(self, clip):
+        self.clip = clip
+        self.has_clip = clip is not None
+
+
+class _SceneClip:
+    def __init__(self, name, length):
+        self.name = name
+        self.length = length
+        self.is_audio_clip = False
+        self.is_midi_clip = True
+
+
+class _SceneTrack:
+    def __init__(self, name, clip):
+        self.name = name
+        self.clip_slots = [_SceneClipSlot(clip)]
+        self.arrangement_clips = []
+
+    def duplicate_clip_to_arrangement(self, clip, destination_time):
+        raise AssertionError("nothing may be copied when the preflight refuses")
+
+
+class _SceneSong:
+    def __init__(self, tracks):
+        self.tracks = list(tracks)
+        self.scenes = [object()]
+
+
+def _scene_surface(module, tracks):
+    surface = module.AbletonGPTControlSurface.__new__(
+        module.AbletonGPTControlSurface
+    )
+    song = _SceneSong(tracks)
+    surface.song = lambda: song
+    surface._track = lambda song_, index: song_.tracks[index]
+    surface.log_message = lambda *args, **kwargs: None
+    return surface
+
+
+def test_scene_copy_refuses_a_length_the_scene_does_not_have():
+    """A copy carries the source clip's length; Live cannot stretch it on the way in.
+
+    So a caller asking for 16 bars from an 8-bar scene has to be refused *before*
+    anything is written, not handed a silently shorter clip.
+    """
+    module = _load_remote_script()
+    surface = _scene_surface(
+        module,
+        [_SceneTrack("Chords", _SceneClip("Chords", 32.0))],
+    )
+
+    try:
+        surface._execute(
+            "copy_scene_to_arrangement",
+            {
+                "scene_index": 0,
+                "destination_time_beats": 96.0,
+                "track_indices": None,
+                "expected_length_beats": 64.0,
+            },
+        )
+    except ValueError as exc:
+        assert "32" in str(exc) and "64" in str(exc)
+    else:
+        raise AssertionError("a length mismatch must refuse the whole placement")
+
+
+def test_scene_copy_without_an_expected_length_still_preflights_normally():
+    module = _load_remote_script()
+    track = _SceneTrack("Chords", _SceneClip("Chords", 32.0))
+    surface = _scene_surface(module, [track])
+    prepared = []
+    surface._prepare_arrangement_copy = lambda ti, tr, clip, dest: prepared.append(ti) or {
+        "end_time": dest + clip.length
+    }
+
+    try:
+        surface._execute(
+            "copy_scene_to_arrangement",
+            {
+                "scene_index": 0,
+                "destination_time_beats": 96.0,
+                "track_indices": None,
+            },
+        )
+    except AssertionError as exc:
+        # _SceneTrack refuses to copy, which is how we know the preflight passed.
+        assert "nothing may be copied" in str(exc)
+    assert prepared == [0]

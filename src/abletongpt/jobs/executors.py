@@ -619,11 +619,16 @@ def _place_scene(bridge: SupportsBridgeCall, params: dict) -> Any:
 
     scene_index = _resolve_scene_index(bridge, source_scene)
     destination_time_beats = float(start_bar) * 4.0
+    # A copy carries the source clip's length, so `length_bars` cannot resize
+    # anything -- it is an assertion about the scene. The Remote Script checks it
+    # inside its existing preflight, which means a mismatch refuses the whole
+    # placement instead of leaving a wrong-length clip behind.
     return bridge.call(
         "copy_scene_to_arrangement",
         scene_index=scene_index,
         destination_time_beats=destination_time_beats,
         track_indices=None,
+        expected_length_beats=float(length_bars) * 4.0,
     )
 
 
