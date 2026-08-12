@@ -40,6 +40,12 @@ SUPPORTED_KIT_ROLES = {"drums", "kick", "snare", "percussion"}
 #: Genre -> ordered Core Library kit names.
 _GENRE_KITS: dict[str, list[str]] = {
     "edm": ["909 Core Kit", "808 Core Kit", "AG Techno Kit", "707 Core Kit", "Chicago Kit"],
+    "tech_house": ["909 Core Kit", "AG Techno Kit", "Chicago Kit", "707 Core Kit", "808 Core Kit"],
+    "dub_techno": ["909 Core Kit", "AG Techno Kit", "707 Core Kit", "606 Core Kit", "Chicago Kit"],
+    "deep_house": ["909 Core Kit", "Chicago Kit", "707 Core Kit", "808 Core Kit", "LD Core Kit"],
+    "minimal_techno": ["909 Core Kit", "AG Techno Kit", "707 Core Kit", "606 Core Kit", "Chicago Kit"],
+    "dub": ["606 Core Kit", "808 Core Kit", "909 Core Kit", "LD Core Kit", "Boom Bap Kit"],
+    "funk": ["Gen Purpose Kit", "Dry Session Kit", "707 Core Kit", "909 Core Kit", "Acuff Kit"],
     "hiphop": ["808 Core Kit", "Boom Bap Kit", "DMX Core Kit", "LD Core Kit", "909 Core Kit"],
     "rnb": ["808 Core Kit", "DMX Core Kit", "LD Core Kit", "Boom Bap Kit", "909 Core Kit"],
     "jazz": ["Dry Session Kit", "Gen Purpose Kit", "Acuff Kit", "Plymouth Kit", "Boom Bap Kit"],
