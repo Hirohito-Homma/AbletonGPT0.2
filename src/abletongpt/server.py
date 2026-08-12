@@ -12,6 +12,12 @@ from .backends import FallbackBridge
 from .bridge import AbletonBridge
 from .composition import build_song_plan
 from .config import setting
+from .delivery import (
+    AudioVerificationCache,
+    build_audio_export_manifest,
+    verify_audio_export_report,
+    wait_for_stable_audio_file,
+)
 from .audio import (
     analyze_stereo_field,
     detect_onsets,
@@ -111,6 +117,7 @@ mcp = FastMCP(
     port=int(os.getenv("ABLETONGPT_MCP_PORT", "8000")),
 )
 bridge = select_backend()
+_audio_verification_cache = AudioVerificationCache(max_entries=8)
 
 
 @mcp.tool()
@@ -142,6 +149,9 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "AI vocal guide planning",
             "rendered vocal audio import",
             "offline WAV/AIFF loudness analysis",
+            "read-only Main-export manifests with exact manual Save/Export settings and overwrite warnings",
+            "post-export WAV/AIFF verification for path, format, duration, loudness, sample peak and estimated True Peak",
+            "read-only export completion monitoring with file-stability checks before automatic verification",
             "offline WAV/AIFF tempo (BPM) estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF key estimation (requires the audio extra: NumPy)",
             "offline WAV/AIFF chord-progression extraction (requires the audio extra: NumPy)",
@@ -181,7 +191,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "localhost-only Ableton bridge",
             "no arbitrary Python execution",
             "no track/file deletion tools",
-            "no automatic Live Set overwrite or export",
+            "Live Set saving and Main audio export remain explicit user actions because the public Live Object Model does not expose them",
             "loudness analysis never modifies the source audio",
         ],
         "external_vocal_engine_required": True,
@@ -1075,9 +1085,112 @@ def analyze_audio_loudness(
     file_path: str,
     target_lufs: float | None = None,
     target_true_peak_dbtp: float = -1.0,
+    engine: str = "auto",
 ) -> dict[str, Any]:
-    """WAV/AIFFを変更せず、LUFS、LRA、True Peak推定、RMS、Crest Factorを解析する。target_lufsは任意。"""
-    return analyze_loudness_file(file_path, target_lufs, target_true_peak_dbtp)
+    """WAV/AIFFを変更せず、LUFS、LRA、True Peak推定、RMS、Crest Factorを解析する。target_lufsは任意。engineは auto/ffmpeg/python（数値がわずかに異なるため比較時は揃える）。"""
+    return analyze_loudness_file(
+        file_path, target_lufs, target_true_peak_dbtp, engine=engine
+    )
+
+
+@mcp.tool()
+def plan_audio_export(
+    title: str,
+    project_directory: str,
+    render_length_beats: float,
+    tempo: float,
+    render_start_beats: float = 0.0,
+    beats_per_bar: int = 4,
+    file_type: str = "wav",
+    sample_rate_hz: int = 48000,
+    bit_depth: int = 24,
+    channels: int = 2,
+    normalize: bool = False,
+    dither: str = "none",
+    target_lufs: float | None = None,
+    target_true_peak_dbtp: float = -1.0,
+    duration_tolerance_seconds: float = 0.25,
+    loudness_tolerance_lu: float = 1.0,
+    platform: str = "macos",
+) -> dict[str, Any]:
+    """Liveを変更せず、Main書き出しのmanifestを作る。公開LOMにSet保存/MainレンダーAPIは
+    ないため、保存先、範囲、形式、Normalize、上書き警告、手動操作と後段の検証条件を返す。
+    実際の保存／書き出しはLiveのダイアログで明示的に行う。"""
+    return build_audio_export_manifest(
+        title=title,
+        project_directory=project_directory,
+        render_length_beats=render_length_beats,
+        tempo=tempo,
+        render_start_beats=render_start_beats,
+        beats_per_bar=beats_per_bar,
+        file_type=file_type,
+        sample_rate_hz=sample_rate_hz,
+        bit_depth=bit_depth,
+        channels=channels,
+        normalize=normalize,
+        dither=dither,
+        target_lufs=target_lufs,
+        target_true_peak_dbtp=target_true_peak_dbtp,
+        duration_tolerance_seconds=duration_tolerance_seconds,
+        loudness_tolerance_lu=loudness_tolerance_lu,
+        platform=platform,
+    )
+
+
+@mcp.tool()
+def verify_audio_export(
+    file_path: str,
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """plan_audio_exportのmanifestと書き出し済みWAV/AIFFを読み取り専用で比較する。
+    パス、形式、Sample Rate、Bit Depth、チャンネル、尺、LUFS、Sample Peak、推定True Peakを
+    検証し、必須条件の失敗と音楽的な警告を分ける。ファイルは変更しない。"""
+    verification = manifest.get("verification")
+    if not isinstance(verification, dict):
+        raise ValueError("manifest must contain a verification object")
+    target_lufs = verification.get("target_lufs")
+    target_true_peak = float(verification.get("target_true_peak_dbtp", -1.0))
+    loudness_report, cache_info = _audio_verification_cache.get_or_analyze(
+        file_path=file_path,
+        target_lufs=target_lufs,
+        target_true_peak_dbtp=target_true_peak,
+        analyzer=analyze_loudness_file,
+    )
+    return verify_audio_export_report(
+        file_path=file_path,
+        manifest=manifest,
+        loudness_report=loudness_report,
+        analysis_cache=cache_info,
+    )
+
+
+@mcp.tool()
+def wait_for_audio_export(
+    file_path: str,
+    manifest: dict[str, Any],
+    timeout_seconds: float = 120.0,
+    poll_interval_seconds: float = 0.5,
+    stable_seconds: float = 2.0,
+    require_change: bool = False,
+) -> dict[str, Any]:
+    """WAV/AIFFの作成または上書きを読み取り専用で監視し、サイズと更新時刻が安定してから
+    verify_audio_exportを実行する。既存ファイルの再書き出しを待つ場合はrequire_change=true。
+    ファイル、Live Set、Liveの状態は変更しない。"""
+    verification = manifest.get("verification")
+    if not isinstance(verification, dict):
+        raise ValueError("manifest must contain a verification object")
+    watch = wait_for_stable_audio_file(
+        file_path,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        stable_seconds=stable_seconds,
+        require_change=require_change,
+    )
+    report = verify_audio_export(file_path=file_path, manifest=manifest)
+    return {
+        **report,
+        "export_watch": watch,
+    }
 
 
 @mcp.tool()

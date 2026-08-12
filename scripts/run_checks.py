@@ -54,6 +54,7 @@ def main() -> None:
         "abletongpt.config",
         "abletongpt.cli.loudness",
         "abletongpt.contextual",
+        "abletongpt.delivery",
         "abletongpt.develop",
         "abletongpt.doctor",
         "abletongpt.drumkits",

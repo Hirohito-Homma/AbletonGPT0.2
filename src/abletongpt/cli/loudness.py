@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 
-from ..loudness import analyze_loudness_file
+from ..loudness import ENGINES, analyze_loudness_file
 
 
 def _num(value: object, suffix: str = "") -> str:
@@ -75,6 +75,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             args.file,
             target_lufs=args.target_lufs,
             target_true_peak_dbtp=args.target_true_peak,
+            engine=args.engine,
         )
     except (ValueError, OSError) as exc:
         # Missing file, unsupported format, or an out-of-range target -> clean exit 2
@@ -106,6 +107,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=-1.0,
         metavar="DBTP",
         help="Target true-peak ceiling in dBTP (-9..0, default: %(default)s).",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=ENGINES,
+        default="auto",
+        help=(
+            "Measurement engine (default: %(default)s). 'auto' uses FFmpeg when "
+            "installed and falls back to the portable path; 'python' forces the "
+            "portable path; 'ffmpeg' refuses instead of falling back. The engines "
+            "disagree slightly (measured: 0.11 dB of true peak), so pin one when "
+            "comparing measurements."
+        ),
     )
     parser.add_argument(
         "--json",

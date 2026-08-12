@@ -13,6 +13,8 @@ AbletonGPT は、以下のようなワークフローを支援します。
 - Live でのトラック・デバイス・パラメータ操作
 - MIDI の表現付け（swing / humanize / accent）
 - LUFS / LRA / peak / RMS のオフライン分析
+- 書き出しの受け渡しと検証（`plan_audio_export` / `wait_for_audio_export` / `verify_audio_export`）。
+  境界と手順は [書き出しワークフロー](docs/EXPORT_WORKFLOW_JA.md) にまとめています
 - AI ボーカルのガイド作成と取り込み
 - local UI での手軽な操作
 

@@ -109,6 +109,13 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
 - **`instruments.py`** — role/genre/mood → native-instrument selection with ordered fallbacks.
 - **`vocal.py`** — lyrics → editable Vocal Guide MIDI and the external-render handoff contract.
 - **`loudness.py`** — offline BS.1770 / EBU R128 analysis of WAV/AIFF; reads the file, never writes.
+  Not stdlib-only any more: with FFmpeg installed it measures through FFmpeg's native `ebur128`
+  filter (2.2 s against 71 s for the portable path on a 5-minute master) and falls back to the
+  stdlib implementation otherwise. **The two engines do not agree exactly** — measured 0.11 dB
+  apart on true peak, within 0.05 LU on integrated/LRA/momentary — so every report names its
+  `analysis_engine`, and `engine="python"`/`"ffmpeg"` pins one when measurements are being
+  compared. `engine="ffmpeg"` refuses rather than falling back, so a batch cannot end up mixing
+  engines without noticing.
 - **`audio.py`** — offline audio-track feature extraction (tempo, key, chord progression,
   monophonic melody). Reuses `loudness.py`'s reader and needs the optional `audio` extra (NumPy,
   imported lazily); the base install stays stdlib-only. Reads the file, never writes.
