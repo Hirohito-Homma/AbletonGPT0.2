@@ -206,6 +206,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 "tempo": float(song.tempo),
                 "signature": [int(song.signature_numerator), int(song.signature_denominator)],
                 "scene_count": len(song.scenes),
+                "scenes": [scene.name for scene in song.scenes],
                 "tracks": [
                     {
                         "index": i,
