@@ -1,4 +1,4 @@
-"""One-shot Live flow: create MIDI tracks, insert instruments, and verify readback."""
+"""One-shot Live flow: create or reuse MIDI tracks, insert instruments, verify readback."""
 
 from __future__ import annotations
 
@@ -51,12 +51,54 @@ def _insert_for_role(track_index: int, role: str, genre: str, mood: str) -> dict
     )
 
 
-def _run_flow(roles: list[str], *, genre: str = "tech_house", mood: str = "dark") -> dict[str, Any]:
+def _parse_into(values: list[str]) -> dict[str, int]:
+    """Parse ``role:index`` pairs naming existing tracks to use instead of new ones.
+
+    An index is a fact about the Set as it is right now, so it is taken verbatim
+    and never guessed: an unparseable pair is refused rather than skipped, which
+    would quietly create a track the caller did not want.
+    """
+
+    mapping: dict[str, int] = {}
+    for value in values:
+        role, separator, raw = value.partition(":")
+        role = role.strip().lower()
+        if not separator or not role:
+            raise ValueError(f"--into expects role:index, got {value!r}")
+        try:
+            index = int(raw)
+        except ValueError:
+            raise ValueError(f"--into track index must be an integer, got {raw!r}") from None
+        if index < 0:
+            raise ValueError(f"--into track index must not be negative, got {index}")
+        if role in mapping:
+            raise ValueError(f"--into names role {role!r} twice")
+        mapping[role] = index
+    return mapping
+
+
+def _run_flow(
+    roles: list[str],
+    *,
+    genre: str = "tech_house",
+    mood: str = "dark",
+    into: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    into = into or {}
+    unknown = sorted(set(into) - set(roles))
+    if unknown:
+        # Silently ignoring these would create a new track for the role the
+        # caller thought they had pointed somewhere.
+        raise ValueError("--into names roles that are not being run: " + ", ".join(unknown))
     results: list[dict[str, Any]] = []
     for role in roles:
         name = TRACK_NAMES.get(role, role.title())
-        created = create_track(track_type="midi", name=name, index=-1)
-        track_index = int(created["index"])
+        existing = into.get(role)
+        if existing is None:
+            created = create_track(track_type="midi", name=name, index=-1)
+            track_index = int(created["index"])
+        else:
+            track_index = existing
         try:
             inserted = _insert_for_role(track_index, role, genre, mood)
             readback = get_track_devices(track_index)
@@ -66,6 +108,7 @@ def _run_flow(roles: list[str], *, genre: str = "tech_house", mood: str = "dark"
                 "track_index": track_index,
                 "role": role,
                 "name": name,
+                "created_track": existing is None,
                 "inserted": inserted,
                 "devices": devices,
                 "ok": ok,
@@ -75,6 +118,7 @@ def _run_flow(roles: list[str], *, genre: str = "tech_house", mood: str = "dark"
                 "track_index": track_index,
                 "role": role,
                 "name": name,
+                "created_track": existing is None,
                 "ok": False,
                 "error": str(exc),
             })
@@ -108,7 +152,12 @@ def _print_result(result: dict[str, Any], *, as_json: bool) -> None:
         # Only the device *names*: get_track_devices returns every parameter of every
         # device, which is ~40 KB per track against a real Live and buries the status.
         names = ", ".join(_device_names(item)) or "none"
-        print(f"  [{status}] track={item['track_index']} role={item['role']} devices={names}")
+        # Whether the track was created or reused decides what undoing this means.
+        origin = "new" if item.get("created_track", True) else "existing"
+        print(
+            f"  [{status}] track={item['track_index']} ({origin}) "
+            f"role={item['role']} devices={names}"
+        )
         error = item.get("error")
         if error:
             print(f"         {error}")
@@ -126,6 +175,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=",".join(DEFAULT_ROLES),
         help="Comma-separated roles to create and populate (default: %(default)s).",
     )
+    parser.add_argument(
+        "--into",
+        action="append",
+        default=[],
+        metavar="ROLE:INDEX",
+        help=(
+            "Insert into an existing track instead of creating one, as role:index "
+            "(repeatable, e.g. --into bass:3). Roles left out still get a new track. "
+            "Live refuses a track that already has an instrument, so the target must "
+            "be empty; check indices with get_live_state."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit the full result as JSON.")
     parser.set_defaults(func=_cmd_run)
     return parser
@@ -134,10 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_run(args: argparse.Namespace) -> int:
     try:
         roles = _parse_roles(args.roles)
+        into = _parse_into(args.into)
+        result = _run_flow(roles, genre=args.genre, mood=args.mood, into=into)
     except ValueError as exc:
         print(f"live-flow: {exc}", file=sys.stderr)
         return 2
-    result = _run_flow(roles, genre=args.genre, mood=args.mood)
     _print_result(result, as_json=args.json)
     return 0 if result["all_ok"] else 1
 
