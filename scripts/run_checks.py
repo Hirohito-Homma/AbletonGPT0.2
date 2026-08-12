@@ -80,6 +80,7 @@ def main() -> None:
         "abletongpt.remap",
         "abletongpt.reverse",
         "abletongpt.scale",
+        "abletongpt.section_spectral",
         "abletongpt.server",
         "abletongpt.snapshots",
         "abletongpt.songspec",
@@ -103,7 +104,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 57, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 58, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 
