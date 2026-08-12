@@ -31,6 +31,9 @@ from .audio import (
     track_beats,
 )
 from .contextual import analyze_midi_context, build_complementary_track_plan
+from .develop import build_developed_arrangement
+from .drumkits import build_drum_kit_selection
+from .jobs.executors import apply_live_drum_kit as apply_drum_kit_step
 from .expression import AUTOMATION_SHAPES, build_expression_plan
 from .extensions_bridge import ExtensionsBridge
 from .groove import build_velocity_groove_plan
@@ -39,6 +42,7 @@ from .instruments import build_instrument_plan, build_role_selection
 from .layering import build_layering_plan
 from .loudness import analyze_loudness_file
 from .meters import build_live_headroom_report
+from .narrative import build_narrative_arc
 from .notelength import build_legato_plan, build_split_plan
 from .phrase import build_phrase_from_loop
 from .progression import build_progression_analysis
@@ -52,6 +56,7 @@ from .targets import get_target, list_targets
 from .timescale import build_timescale_plan, factor_for
 from .transpose import build_transpose_plan, shift_to_target_pc
 from .transcription import (
+    build_locators_from_sections,
     build_locators_from_structure,
     build_midi_from_chords,
     build_midi_from_melody,
@@ -172,6 +177,8 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "read-only Roman-numeral / functional (tonic/subdominant/dominant) analysis of a MIDI clip's chord progression",
             "velocity groove/dynamics editing of an existing MIDI clip: crescendo ramp, dynamic-range compress/expand, and a cyclic accent pattern (plan then apply; velocities only, note count unchanged, Live-undoable)",
             "building a longer phrase from an existing MIDI loop: tiling it N times with an optional velocity build-up and final-bar fill (plan then create into an empty slot; never overwrites the source)",
+            "reading the meaning of a song's development into a per-section narrative arc (energy curve, tension, role, and concrete density/dynamics/register/motion change directives) so the same material can be developed with intent",
+            "developing one MIDI loop into a full narrative arrangement: rebuilding the loop differently in every section per the narrative directives (thin intro, varied verses, a build that fills into a full octave-doubled chorus, an intimate breakdown) and concatenating them into one long clip (plan then create into an empty slot; never overwrites the source)",
             "section-by-section layering/mute planning from a song structure (role-aware, e.g. sparse intro / full chorus / drums-out breakdown), and applying one section's mutes to the live tracks",
             "half-time / double-time conversion of an existing MIDI clip: scaling note timing and clip length by a factor (plan then create into an empty slot; never overwrites the source)",
             "reversing (retrograde) an existing MIDI clip in time (plan then apply; note count/length unchanged, Live-undoable)",
@@ -1076,9 +1083,12 @@ def analyze_audio_loudness(
     file_path: str,
     target_lufs: float | None = None,
     target_true_peak_dbtp: float = -1.0,
+    engine: str = "auto",
 ) -> dict[str, Any]:
-    """WAV/AIFFを変更せず、LUFS、LRA、True Peak推定、RMS、Crest Factorを解析する。target_lufsは任意。"""
-    return analyze_loudness_file(file_path, target_lufs, target_true_peak_dbtp)
+    """WAV/AIFFを変更せず、LUFS、LRA、True Peak推定、RMS、Crest Factorを解析する。target_lufsは任意。engineは auto/ffmpeg/python（数値がわずかに異なるため比較時は揃える）。"""
+    return analyze_loudness_file(
+        file_path, target_lufs, target_true_peak_dbtp, engine=engine
+    )
 
 
 @mcp.tool()
@@ -1535,11 +1545,179 @@ def create_arrangement_locators_from_structure(
     plan = build_locators_from_structure(structure, tempo, include_end=include_end)
     if not plan["locators"]:
         raise ValueError("no sections detected; nothing to place")
-    bridge_locators = [
-        {"time": locator["time_beats"], "name": locator["name"]} for locator in plan["locators"]
-    ]
-    result = bridge.call("add_locators", locators=bridge_locators)
+    result = _place_locators(plan["locators"])
     result["source"] = "audio_structure"
+    result["planned_count"] = plan["count"]
+    return result
+
+
+def _place_locators(locators: list[dict[str, Any]]) -> dict[str, Any]:
+    """Place Arrangement locators, one Live tick per step.
+
+    ``set_or_delete_cue`` acts at the transport position and is a toggle, so the
+    playhead must be moved first. Live applies a transport move on a *later*
+    tick, which means the move and the toggle cannot share a command: doing so
+    toggled a cue at the old position, which either put the locator in the wrong
+    place or deleted an existing one. Each bridge call is its own tick, so the
+    move, the confirmation and the toggle are three separate calls.
+    """
+    state = bridge.call("get_transport_state")
+    original_time = float(state["current_song_time"])
+    created: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    try:
+        for locator in locators:
+            time = float(locator["time_beats"])
+            name = str(locator["name"])
+            bridge.call("jump_transport", time=time)
+            moved = bridge.call("get_transport_state")
+            actual = float(moved["current_song_time"])
+            if abs(actual - time) > 1e-4:
+                skipped.append(
+                    {
+                        "time": time,
+                        "name": name,
+                        "reason": "transport reached %g, not %g" % (actual, time),
+                    }
+                )
+                continue
+            result = bridge.call(
+                "toggle_cue_at_playhead", expected_time=time, name=name
+            )
+            if result.get("created"):
+                created.append({"time": result["time"], "name": name})
+            else:
+                skipped.append(
+                    {"time": time, "name": name, "reason": result.get("reason", "refused")}
+                )
+    finally:
+        bridge.call("jump_transport", time=original_time)
+
+    final = bridge.call("get_transport_state")
+    return {
+        "created": created,
+        "skipped": skipped,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "total_cue_points": final.get("cue_count"),
+    }
+
+
+MAX_ENVELOPE_STEPS = 512
+
+
+@mcp.tool()
+def set_clip_parameter_envelope(
+    track_index: int,
+    clip_index: int,
+    device_index: int,
+    parameter_index: int,
+    steps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """SessionクリップにデバイスパラメーターのステップEnvelope(オートメーション)を書き込む。
+    stepsは{start,length,value}(クリップ内の拍)。値はパラメーターの範囲で検証し、書き込み後にvalue_at_timeで
+    読み戻して返す。Live APIではクリップEnvelopeはSessionクリップ専用(Arrangementクリップはnullを返す)なので、
+    Arrangementへ反映したい場合は先にここへ書いてからcopy_session_clip_to_arrangementすること。
+    先にget_track_devicesでパラメーターの範囲を確認すること。Remote Scriptバックエンド必須。"""
+    if min(track_index, clip_index, device_index, parameter_index) < 0:
+        raise ValueError("indices must be non-negative")
+    if not steps:
+        raise ValueError("steps must be a non-empty list")
+    if len(steps) > MAX_ENVELOPE_STEPS:
+        raise ValueError("steps must contain at most %d entries" % MAX_ENVELOPE_STEPS)
+    for step in steps:
+        for key in ("start", "length", "value"):
+            if key not in step:
+                raise ValueError("each step needs start, length and value")
+        if float(step["start"]) < 0:
+            raise ValueError("step start must be non-negative")
+        if float(step["length"]) <= 0:
+            raise ValueError("step length must be positive")
+    return bridge.call(
+        "set_clip_envelope",
+        track_index=track_index,
+        clip_index=clip_index,
+        device_index=device_index,
+        parameter_index=parameter_index,
+        steps=steps,
+    )
+
+
+@mcp.tool()
+def set_clip_send_envelope(
+    track_index: int,
+    clip_index: int,
+    send_index: int,
+    steps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """SessionクリップにSend量のステップEnvelopeを書き込む。ダブのディレイ・スロー用。
+
+    send_index=0がリターンA、1がB。stepsは{start,length,value}(クリップ内の拍)で、
+    値は0.0〜1.0。SendはミキサーにありデバイスチェーンではないのでデバイスEnvelope
+    (set_clip_parameter_envelope)では届かない。ArrangementへはSessionで書いてから
+    copy_session_clip_to_arrangementで運ぶこと。Remote Scriptバックエンド必須。
+    """
+    if min(track_index, clip_index, send_index) < 0:
+        raise ValueError("indices must be non-negative")
+    if not steps:
+        raise ValueError("steps must be a non-empty list")
+    if len(steps) > MAX_ENVELOPE_STEPS:
+        raise ValueError("steps must contain at most %d entries" % MAX_ENVELOPE_STEPS)
+    for step in steps:
+        for key in ("start", "length", "value"):
+            if key not in step:
+                raise ValueError("each step needs start, length and value")
+        if float(step["start"]) < 0:
+            raise ValueError("step start must be non-negative")
+        if float(step["length"]) <= 0:
+            raise ValueError("step length must be positive")
+        if not 0.0 <= float(step["value"]) <= 1.0:
+            raise ValueError("a send value must be between 0.0 and 1.0")
+    return bridge.call(
+        "set_clip_envelope",
+        track_index=track_index,
+        clip_index=clip_index,
+        send_index=send_index,
+        steps=steps,
+    )
+
+
+@mcp.tool()
+def get_transport_state() -> dict[str, Any]:
+    """Arrangementのトランスポート位置・曲長・ループ・既存ロケーター一覧を読み取り専用で取得する。
+    ロケーター配置は「再生ヘッドを動かしてからキューをトグルする」ため、意図しない位置に付く場合に
+    current_song_time/start_timeのどちらが動いたか、ループや曲長が制約していないかを実測で確認できる。
+    Liveを一切変更しない。Remote Scriptバックエンド必須。"""
+    return bridge.call("get_transport_state")
+
+
+@mcp.tool()
+def plan_arrangement_locators_from_sections(
+    sections: list[dict[str, Any]],
+    time_signature: str = "4/4",
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """既知のセクション一覧(name/start_bar、1始まり)からArrangementロケーターの計画を返す。
+    オーディオ解析もtempoも不要(小節→拍は拍子だけで決まる)。include_endで末尾にEndロケーター。読み取り専用。"""
+    return build_locators_from_sections(
+        sections, time_signature=time_signature, include_end=include_end
+    )
+
+
+@mcp.tool()
+def create_arrangement_locators_from_sections(
+    sections: list[dict[str, Any]],
+    time_signature: str = "4/4",
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """既知のセクション一覧からArrangementに名前付きロケーターを追加する。既にロケーターがある位置はスキップ
+    (追加のみ・既存は削除しない)。作曲済みの構成をそのまま置ける。まずplan_arrangement_locators_from_sectionsで確認すること。
+    Remote Scriptバックエンド必須。NumPyは不要。"""
+    plan = build_locators_from_sections(
+        sections, time_signature=time_signature, include_end=include_end
+    )
+    result = _place_locators(plan["locators"])
+    result["source"] = "explicit_sections"
     result["planned_count"] = plan["count"]
     return result
 
@@ -1621,6 +1799,53 @@ def apply_live_instrument_selection(
         "next_step": (
             selection["content_note"]
             or "再生して音域と音色を確認し、必要ならデバイスのパラメーターを調整してください。"
+        ),
+    }
+
+
+@mcp.tool()
+def plan_live_drum_kit(
+    genre: str = "pop",
+    mood: str = "bright",
+    role: str = "drums",
+    preferred_kit: str = "",
+) -> dict[str, Any]:
+    """Liveを変更せず、ジャンル・ムード・ドラム役割からCore Libraryのキット候補を順位付けする。
+    空のDrum Rackを挿すapply_live_instrument_selectionと違い、実際に音の出るキットを選ぶ。
+    ブラウザ上の位置(path/URI)はここでは決めず、適用時にLiveを走査して解決する。"""
+    return build_drum_kit_selection(genre, mood, role, preferred_kit)
+
+
+@mcp.tool()
+def apply_live_drum_kit(
+    track_index: int,
+    genre: str = "pop",
+    mood: str = "bright",
+    role: str = "drums",
+    preferred_kit: str = "",
+) -> dict[str, Any]:
+    """確認済みのキット選択を、インストゥルメントを持たないMIDIトラック1本へロードする。
+    候補名をLiveブラウザで走査して実在するものを選び、1トラックにつきキットは1台だけ。
+    既存インストゥルメントは置き換えない(候補と一致する場合のみ適用済みとして扱う)。"""
+    if track_index < 0:
+        raise ValueError("track_index must be non-negative")
+    selection = build_drum_kit_selection(genre, mood, role, preferred_kit)
+    applied = apply_drum_kit_step(
+        bridge,
+        {
+            "track_index": track_index,
+            "role": role,
+            "genre": genre,
+            "mood": mood,
+            "preferred_kit": preferred_kit,
+        },
+    )
+    return {
+        "selection": selection,
+        "applied": applied,
+        "next_step": (
+            "再生してキックとスネアのピッチマッピングを確認し、必要なら"
+            "browse_device_presetsで別のキットを選び直してください。"
         ),
     }
 
@@ -1873,6 +2098,78 @@ def create_phrase_from_loop(
     }
 
 
+@mcp.tool()
+def plan_developed_arrangement(
+    track_index: int,
+    clip_index: int,
+    structure: list[str],
+    section_repeats: int = 2,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Liveを変更せず、1本のMIDIループを「物語のあるアレンジ」へ発展させるプランを作る。structure(セクションの
+    ラベル列)ごとにループをsection_repeats回タイル展開し、そのセクションのナラティブ・ディレクティブ
+    (plan_narrative_arcと同じ読み:密度/register/velocity/繰り返しの変化vary/次への繋ぎ)で作り替え、全セクションを
+    1本の長いクリップに連結する。定石:intro=薄く、verse=戻るたび変化、build=フィルで盛り上げてサビへ、
+    chorus/climax=フルでトップをオクターブ重ね、breakdown=低音を抜いて親密に。phraseの「そのまま反復」とは違い、
+    セクションごとに変化させて起承転結を作る。音数と長さが増えるので空スロットへ書き出す(create_developed_arrangement)。
+    決定的(同じループ+structure+seedは常に同じ結果)。読み取り専用・NumPy不要。"""
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_developed_arrangement(clip_data, list(structure), section_repeats=section_repeats, seed=seed)
+    plan["next_step"] = (
+        "空きスロットを選び、create_developed_arrangementに同じ引数とdestination_clip_index、"
+        "expected_source_fingerprint=%s を渡して書き出してください。" % plan["source_fingerprint"]
+    )
+    return plan
+
+
+@mcp.tool()
+def create_developed_arrangement(
+    track_index: int,
+    clip_index: int,
+    structure: list[str],
+    destination_clip_index: int,
+    section_repeats: int = 2,
+    seed: int = 0,
+    destination_track_index: int = -1,
+    name: str = "",
+    expected_source_fingerprint: str = "",
+) -> dict[str, Any]:
+    """plan_developed_arrangementで確認した物語アレンジを、空きSessionスロットへ新規クリップとして書き出す。
+    1本のループをstructureに沿ってセクションごとに変化させながら連結し、destination_clip_index(省略時は同一track)の
+    空スロットへcreate_midi_clipで作成する(占有スロットは拒否=非破壊)。expected_source_fingerprintを渡すと確認後に
+    元クリップが変わっていた場合は拒否する。読み取り以外の副作用は新規クリップ作成のみ。"""
+    if track_index < 0 or clip_index < 0 or destination_clip_index < 0:
+        raise ValueError("indices must be non-negative")
+    clip_data = _read_midi_clip(track_index, clip_index)
+    plan = build_developed_arrangement(clip_data, list(structure), section_repeats=section_repeats, seed=seed)
+    if expected_source_fingerprint and expected_source_fingerprint != plan["source_fingerprint"]:
+        raise ValueError("source MIDI clip changed after the plan was reviewed")
+    destination_track = track_index if destination_track_index < 0 else destination_track_index
+    clip_name = name or "%s story" % clip_data.get("clip", "Loop")
+    created = bridge.call(
+        "create_midi_clip",
+        track_index=destination_track,
+        clip_index=destination_clip_index,
+        name=clip_name,
+        length_beats=plan["length_beats"],
+        notes=plan["notes"],
+    )
+    return {
+        "structure": plan["structure"],
+        "section_repeats": plan["section_repeats"],
+        "seed": plan["seed"],
+        "shape": plan["shape"],
+        "peak_label": plan["peak_label"],
+        "length_beats": plan["length_beats"],
+        "note_count": plan["note_count"],
+        "sections": plan["sections"],
+        "destination_track_index": destination_track,
+        "destination_clip_index": destination_clip_index,
+        "created": created,
+        "next_step": "生成したアレンジを再生して確認してください。元ループは変更していません。",
+    }
+
+
 def _resolve_timescale_factor(mode: str, factor: float) -> float:
     """Pick the time-scale factor from a named mode ('half'/'double') or an explicit factor."""
     if mode:
@@ -1968,6 +2265,20 @@ def _layering_tracks(track_roles: list[str] | None) -> list[dict[str, Any]]:
             entry["role"] = role
         resolved.append(entry)
     return resolved
+
+
+@mcp.tool()
+def plan_narrative_arc(structure: list[str]) -> dict[str, Any]:
+    """Liveを変更せず、曲構造(セクションのラベル列)から「展開の意味」を読み取ったナラティブ弧を返す。
+    各セクションにエネルギー値(0..1)を、定石に沿って文脈付きで割り当てる:intro=薄い、build=次のサビへ向けて
+    上昇、breakdownで一度落としてから最後のサビが最も強く当たる、繰り返されるセクション(2回目のverse/chorus)は
+    毎回少しずつ大きくなる。各セクションについてtension(上昇/下降/維持)、役割(setup/development/climax/
+    release/resolution/reset)、具体的な変化ディレクティブ(density/dynamics/register/次への繋ぎmotion/
+    目標velocity/繰り返しは変化を付けるかvary)を返し、全体ではエネルギーカーブ・ピーク位置・形(front-loaded/
+    arch/climactic)を返す。同じ素材を「機械的な反復」ではなく「意図を持った展開」にするための土台。
+    レイヤー(どのトラックが鳴るか)はplan_section_layers、実際のクリップ生成は展開系のcreateツールを併用。
+    読み取り専用・NumPy不要。"""
+    return build_narrative_arc(list(structure))
 
 
 @mcp.tool()
@@ -2174,7 +2485,9 @@ def browse_device_presets(
 ) -> dict[str, Any]:
     """Liveブラウザの内容を読み取り専用で列挙する。categoryはinstruments/sounds/drums/
     audio_effects/midi_effects/samples/plugins/max_for_live/packs/user_libraryのいずれか。
-    pathでフォルダを1階層ずつ辿る。各項目はname/is_folder/is_loadable/is_device/uri/sourceを返す。
+    pathで1階層ずつ辿る。フォルダに加え、プリセットを持つデバイス名も辿れる
+    (Liveはデバイスをis_folder=falseとして返すため、辿れるかはis_expandableで判断する)。
+    各項目はname/is_folder/is_expandable/is_loadable/is_device/uri/sourceを返す。
     プリセットのロードや挿入は一切行わない。"""
     if category not in _BROWSER_CATEGORIES:
         raise ValueError("category must be one of: %s" % ", ".join(_BROWSER_CATEGORIES))
@@ -2200,7 +2513,8 @@ def load_browser_preset(
     path: list[str] | None = None,
 ) -> dict[str, Any]:
     """browse_device_presetsで見つけたプリセット／キットを、指定トラックへLiveブラウザからロードするMutation。
-    categoryとpath（フォルダ名列）で場所を特定し、そのフォルダ直下のnameという読み込み可能項目をロードする。
+    categoryとpath（フォルダ名、またはプリセットを持つデバイス名の列）で場所を特定し、
+    その直下のnameという読み込み可能項目をロードする。例: path=["Vocoder"]でVocoderのプリセット。
     安全のため、既にインストゥルメントを持つトラックへのロードは拒否する（既存楽器を置き換えない・追加のみ）。
     1回1トラック。まずbrowse_device_presetsでname/pathを確認すること。"""
     if track_index < 0:
@@ -2319,6 +2633,36 @@ def set_track_pan(track_index: int, pan: float) -> dict[str, Any]:
     if track_index < 0 or not -1 <= pan <= 1:
         raise ValueError("invalid track_index or pan")
     return bridge.call("set_track_pan", track_index=track_index, pan=pan)
+
+
+@mcp.tool()
+def set_track_send(
+    track_index: int, send_index: int, value: float, normalized: bool = True
+) -> dict[str, Any]:
+    """トラックのSend量を設定する。send_index=0がリターンA、1がBに対応する。
+
+    normalized=Trueなら0.0〜1.0で指定する（既定）。ダブのディレイ・スローのように
+    セクションごとに送り量を変える用途を想定している。
+    """
+    if track_index < 0 or send_index < 0:
+        raise ValueError("track_index and send_index must be non-negative")
+    if normalized and not 0.0 <= value <= 1.0:
+        raise ValueError("a normalized send value must be between 0.0 and 1.0")
+    return bridge.call(
+        "set_track_send",
+        track_index=track_index,
+        send_index=send_index,
+        value=value,
+        normalized=normalized,
+    )
+
+
+@mcp.tool()
+def create_return_track(name: str = "") -> dict[str, Any]:
+    """リターントラックを追加する。Liveの既定セットには既にA-ReverbとB-Delayがある。"""
+    if len(name) > 200:
+        raise ValueError("name must be 200 characters or fewer")
+    return bridge.call("create_return_track", name=name)
 
 
 @mcp.tool()

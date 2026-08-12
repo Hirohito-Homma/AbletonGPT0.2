@@ -43,16 +43,21 @@ def main() -> None:
         "abletongpt.cli.contextual",
         "abletongpt.cli.expression",
         "abletongpt.cli.instruments",
+        "abletongpt.cli.intent",
         "abletongpt.cli.jobs",
+        "abletongpt.cli.live_flow",
         "abletongpt.cli.main",
         "abletongpt.cli.serialization",
+        "abletongpt.cli.ui",
         "abletongpt.cli.vocal",
         "abletongpt.composition",
         "abletongpt.config",
         "abletongpt.cli.loudness",
         "abletongpt.contextual",
         "abletongpt.delivery",
+        "abletongpt.develop",
         "abletongpt.doctor",
+        "abletongpt.drumkits",
         "abletongpt.expression",
         "abletongpt.extensions_bridge",
         "abletongpt.groove",
@@ -60,11 +65,14 @@ def main() -> None:
         "abletongpt.instruments",
         "abletongpt.jobs",
         "abletongpt.jobs.executors",
+        "abletongpt.jobs.kihachi",
         "abletongpt.jobs.runner",
         "abletongpt.jobs.store",
+        "abletongpt.jobs.tracks",
         "abletongpt.layering",
         "abletongpt.loudness",
         "abletongpt.meters",
+        "abletongpt.narrative",
         "abletongpt.notelength",
         "abletongpt.phrase",
         "abletongpt.progression",
@@ -75,6 +83,7 @@ def main() -> None:
         "abletongpt.scale",
         "abletongpt.server",
         "abletongpt.snapshots",
+        "abletongpt.songspec",
         "abletongpt.targets",
         "abletongpt.timescale",
         "abletongpt.transcription",
@@ -95,7 +104,7 @@ def main() -> None:
     else:
         print("PASS dependency mcp")
 
-    print("\n%d checks, %d failures" % (len(tests) + 49, len(failures)))
+    print("\n%d checks, %d failures" % (len(tests) + 58, len(failures)))
     raise SystemExit(1 if failures else 0)
 
 

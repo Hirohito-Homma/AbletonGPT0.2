@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from abletongpt.bridge import AbletonConnectionError
 from abletongpt.jobs import (
     AbletonStepExecutor,
     JobPlan,
@@ -20,12 +21,23 @@ class FakeBridge:
     command mapping in isolation. Set ``raise_on`` to simulate a bridge failure.
     """
 
-    def __init__(self, *, tempo: float = 124.0, is_playing: bool = False, tracks=None):
+    def __init__(
+        self,
+        *,
+        tempo: float = 124.0,
+        is_playing: bool = False,
+        tracks=None,
+        devices=None,
+    ):
         self._tempo = tempo
         self._is_playing = is_playing
         self._tracks = tracks if tracks is not None else [{"index": 0, "name": "Track 1"}]
         self.calls: list[tuple[str, dict]] = []
         self.raise_on: str | None = None
+        self.create_error: Exception | None = None
+        self.existing_clip: dict | None = None
+        self.devices = list(devices or [])
+        self.instrument_error: Exception | None = None
 
     def call(self, command: str, **params):
         self.calls.append((command, params))
@@ -42,7 +54,42 @@ class FakeBridge:
                 "is_playing": self._is_playing,
                 "tempo": self._tempo,
                 "tracks": self._tracks,
+                "scenes": ["intro", "drop", "outro"],
             }
+        if command == "get_track_devices":
+            return {"track_index": params["track_index"], "devices": list(self.devices)}
+        if command == "insert_first_available_instrument":
+            candidate = params["candidates"][0]
+            self.devices.append(
+                {
+                    "name": candidate,
+                    "class_name": candidate,
+                    "class_display_name": candidate,
+                    "type": 1,
+                }
+            )
+            if self.instrument_error is not None:
+                raise self.instrument_error
+            return {"name": candidate}
+        if command == "create_midi_clip" and self.create_error is not None:
+            raise self.create_error
+        if command == "create_midi_clip":
+            self.existing_clip = {
+                "clip": params["name"],
+                "length_beats": params["length_beats"],
+                "truncated": False,
+                "notes": list(params["notes"]),
+            }
+            return {"ok": True}
+        if command == "get_midi_clip_notes" and self.existing_clip is not None:
+            return self.existing_clip
+        if command in {
+            "create_track",
+            "set_clip_envelope",
+            "copy_session_clip_to_arrangement",
+            "copy_scene_to_arrangement",
+        }:
+            return {"ok": True}
         raise AssertionError("unexpected bridge command: %s" % command)
 
 
@@ -58,6 +105,13 @@ def test_executor_satisfies_step_executor_protocol():
         "set_tempo",
         "is_playing",
         "get_tracks",
+        "create_track",
+        "apply_live_instrument_selection",
+        "apply_live_drum_kit",
+        "create_midi_clip",
+        "set_clip_send_envelope",
+        "copy_session_clip_to_arrangement",
+        "place_scene",
     }
 
 
@@ -94,6 +148,368 @@ def test_read_commands_use_get_state():
 
     # Each read command dispatches a get_state; none mutate.
     assert bridge.calls == [("get_state", {})] * 3
+
+
+def test_kihachi_core_operations_map_to_the_existing_bridge_protocol():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+    notes = [
+        {"pitch": 60, "start_time": 0.0, "duration": 1.0, "velocity": 90}
+    ]
+    envelope = [{"start": 0.0, "length": 4.0, "value": 0.42}]
+
+    executor.execute(
+        JobStep(
+            "00_track",
+            "create_track",
+            {"track_type": "midi", "name": "KIHACHI Chords", "index": -1},
+        )
+    )
+    executor.execute(
+        JobStep(
+            "01_clip",
+            "create_midi_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "name": "Chords",
+                "length_beats": 4,
+                "notes": notes,
+            },
+        )
+    )
+    executor.execute(
+        JobStep(
+            "02_send",
+            "set_clip_send_envelope",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "send_index": 1,
+                "steps": envelope,
+            },
+        )
+    )
+    executor.execute(
+        JobStep(
+            "03_copy",
+            "copy_session_clip_to_arrangement",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "destination_time_beats": 0,
+                "name": "KIHACHI Chords",
+            },
+        )
+    )
+
+    assert bridge.calls == [
+        (
+            "create_track",
+            {"track_type": "midi", "name": "KIHACHI Chords", "index": -1},
+        ),
+        (
+            "create_midi_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "name": "Chords",
+                "length_beats": 4.0,
+                "notes": notes,
+                "_timeout": 30.0,
+            },
+        ),
+        ("get_midi_clip_notes", {"track_index": 0, "clip_index": 0}),
+        (
+            "set_clip_envelope",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "send_index": 1,
+                "steps": envelope,
+            },
+        ),
+        (
+            "copy_session_clip_to_arrangement",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "destination_time_beats": 0.0,
+                "name": "KIHACHI Chords",
+            },
+        ),
+    ]
+
+
+def test_place_scene_uses_scene_name_to_copy_scene_to_arrangement():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "00_place_scene_drop",
+            "place_scene",
+            {
+                "source_scene": "drop",
+                "start_bar": 4,
+                "length_bars": 8,
+                "transition": "fill",
+            },
+        )
+    )
+
+    assert bridge.calls == [
+        ("get_state", {}),
+        (
+            "copy_scene_to_arrangement",
+            {
+                "scene_index": 1,
+                "destination_time_beats": 16.0,
+                "track_indices": None,
+                # A copy carries the source clip's length, so the requested length
+                # travels as an assertion the Remote Script preflights.
+                "expected_length_beats": 32.0,
+            },
+        ),
+    ]
+
+
+def test_instrument_selection_resolves_the_role_and_verifies_readback():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert [command for command, _params in bridge.calls] == [
+        "get_track_devices",
+        "insert_first_available_instrument",
+        "get_track_devices",
+    ]
+    insert = bridge.calls[1][1]
+    assert insert["track_index"] == 2
+    assert insert["candidates"][0] == "Operator"
+    assert insert["index"] == -1
+
+
+def test_instrument_selection_resume_accepts_one_matching_instrument():
+    bridge = FakeBridge(
+        devices=[
+            {
+                "name": "Operator",
+                "class_name": "Operator",
+                "class_display_name": "Operator",
+                "type": 1,
+            }
+        ]
+    )
+
+    AbletonStepExecutor(bridge).execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert bridge.calls == [("get_track_devices", {"track_index": 2})]
+
+
+def test_instrument_selection_refuses_to_replace_a_different_instrument():
+    bridge = FakeBridge(
+        devices=[
+            {
+                "name": "Electric",
+                "class_name": "Electric",
+                "class_display_name": "Electric",
+                "type": 1,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="different instrument"):
+        AbletonStepExecutor(bridge).execute(
+            JobStep(
+                "instrument",
+                "apply_live_instrument_selection",
+                {
+                    "track_index": 2,
+                    "role": "bass",
+                    "genre": "edm",
+                    "mood": "dark",
+                },
+            )
+        )
+
+    assert bridge.calls == [("get_track_devices", {"track_index": 2})]
+
+
+def test_instrument_selection_reconciles_an_ambiguous_success():
+    bridge = FakeBridge()
+    bridge.instrument_error = AbletonConnectionError("response timed out")
+
+    AbletonStepExecutor(bridge).execute(
+        JobStep(
+            "instrument",
+            "apply_live_instrument_selection",
+            {
+                "track_index": 2,
+                "role": "bass",
+                "genre": "edm",
+                "mood": "dark",
+            },
+        )
+    )
+
+    assert [command for command, _params in bridge.calls] == [
+        "get_track_devices",
+        "insert_first_available_instrument",
+        "get_track_devices",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("command", "params", "message"),
+    [
+        ("create_track", {"track_type": "return"}, "track_type"),
+        (
+            "apply_live_instrument_selection",
+            {
+                "track_index": 0,
+                "role": "guitar",
+                "genre": "edm",
+                "mood": "dark",
+            },
+            "unsupported instrument role",
+        ),
+        (
+            "create_midi_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "name": "bad",
+                "length_beats": 4,
+                "notes": [{"pitch": 128, "start_time": 0, "duration": 1}],
+            },
+            "pitch",
+        ),
+        (
+            "create_midi_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "name": "duplicates",
+                "length_beats": 4,
+                "notes": [
+                    {"pitch": 60, "start_time": 0, "duration": 1},
+                    {"pitch": 60, "start_time": 0, "duration": 0.5},
+                ],
+            },
+            "Live would merge",
+        ),
+        (
+            "set_clip_send_envelope",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "send_index": 1,
+                "steps": [{"start": 0, "length": 4, "value": 1.1}],
+            },
+            "between 0.0 and 1.0",
+        ),
+        (
+            "copy_session_clip_to_arrangement",
+            {"track_index": 0, "clip_index": 0, "destination_time_beats": -1},
+            "outside",
+        ),
+    ],
+)
+def test_kihachi_core_operations_validate_before_call(command, params, message):
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    with pytest.raises(ValueError, match=message):
+        executor.execute(JobStep("bad", command, params))
+
+    assert bridge.calls == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("target clip slot is not empty"),
+        AbletonConnectionError("response timed out"),
+    ],
+)
+def test_create_midi_clip_reconciles_an_ambiguous_success_by_full_readback(error):
+    notes = [
+        {"pitch": 60, "start_time": 0.0, "duration": 1.0, "velocity": 90},
+        {"pitch": 64, "start_time": 1.0, "duration": 1.0, "velocity": 88},
+    ]
+    bridge = FakeBridge()
+    bridge.create_error = error
+    bridge.existing_clip = {
+        "clip": "Chords",
+        "length_beats": 4.0,
+        "truncated": False,
+        # Live may reorder notes and move beat values by sub-microbeat amounts.
+        "notes": [
+            {"pitch": 64, "start_time": 1.00000005, "duration": 1.0, "velocity": 88},
+            {"pitch": 60, "start_time": 0.0, "duration": 1.00000005, "velocity": 90},
+        ],
+    }
+    params = {
+        "track_index": 2,
+        "clip_index": 0,
+        "name": "Chords",
+        "length_beats": 4,
+        "notes": notes,
+    }
+
+    AbletonStepExecutor(bridge).execute(JobStep("clip", "create_midi_clip", params))
+
+    assert [command for command, _params in bridge.calls] == [
+        "create_midi_clip",
+        "get_midi_clip_notes",
+    ]
+
+
+def test_create_midi_clip_refuses_an_occupied_slot_with_different_notes():
+    bridge = FakeBridge()
+    bridge.create_error = RuntimeError("target clip slot is not empty")
+    bridge.existing_clip = {
+        "clip": "Chords",
+        "length_beats": 4.0,
+        "truncated": False,
+        "notes": [{"pitch": 61, "start_time": 0.0, "duration": 1.0, "velocity": 90}],
+    }
+    params = {
+        "track_index": 2,
+        "clip_index": 0,
+        "name": "Chords",
+        "length_beats": 4,
+        "notes": [{"pitch": 60, "start_time": 0.0, "duration": 1.0, "velocity": 90}],
+    }
+
+    with pytest.raises(RuntimeError, match="not empty"):
+        AbletonStepExecutor(bridge).execute(
+            JobStep("clip", "create_midi_clip", params)
+        )
 
 
 # --- failure handling ------------------------------------------------------------

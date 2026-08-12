@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Sends and return tracks
 
@@ -30,11 +30,166 @@ the six additive core operations (`create_track`, `apply_live_instrument_selecti
 Instrument selection accepts a semantic role/genre/mood, then AbletonGPT owns the
 native-device candidates and sends `insert_first_available_instrument` to Live.
 Resume accepts one candidate-matching instrument; a different existing instrument
-is never replaced. Drums stay outside *instrument selection* — an empty Drum Rack or
-Impulse is silent — and go through `apply_live_drum_kit`, which discovers a real kit
-by walking the read-only browser and verifies the readback. The resulting saved
+is never replaced. The resulting saved
 JobPlan remains pending until a separate `jobs run`/`resume`; unknown operations or
 bad parameters reject the whole import before any Live bridge call.
+
+**Drums take a separate operation, because a device is not a kit.** Inserting Drum
+Rack or Impulse succeeds and stays *silent* — `instruments.py` marks both
+`requires_content` — so drums were originally excluded from instrument selection
+altogether. `apply_live_drum_kit` closes that gap without weakening the boundary:
+KIHACHI still sends only `track_index`/`role`/`genre`/`mood` (role is `drums`, or
+`kick`/`snare`/`percussion` for the split layout, and every split track gets its
+own kit because a track with no instrument is silent however few pitches it plays).
+`drumkits.py` owns the ordered Core Library kit *names* and nothing else — no path,
+no URI, no `.adg`. Where a kit lives is a fact about the installed Live, so
+`jobs.executors.apply_live_drum_kit` **discovers** it by walking the read-only
+`browse_presets` tree under the `drums` root breadth-first (shallowest duplicate
+wins — `Fabrik Kit` ships in both Core Library and a Pack — bounded to depth 3 / 64
+calls so a self-referential folder cannot loop), then loads the first candidate that
+actually exists via `load_preset` and verifies the readback.
+
+Two things about that browser were measured against a running Live 12 and are not
+guessable. **Names carry their file extension**: the root lists `"909 Core Kit.adg"`,
+so a match on `"909 Core Kit"` finds nothing. `_kit_key` strips `.adg` for matching
+while the *unstripped* name is what gets loaded, because that is what `load_preset`
+compares against; Live then names the resulting device with the extension dropped,
+which is what the readback sees. **The root is flat and huge**: 627 loadable items
+with Core Library and Packs side by side, plus a `Drum Hits` folder whose subtree
+made a full walk enumerate 7689 items in 13s *per track*. So the walk short-circuits
+as soon as the first-choice candidate is found (nothing deeper can outrank it),
+which brought that to one call and 0.67s; a genuinely missing first choice still
+falls back to the full bounded walk. Note the bare `Drum Rack` **device** is itself
+loadable in that same root — loading it is the silent-kit bug, so it must never be a
+candidate name.
+
+Verified end to end on 2026-08-10, as a real 24-step `jobs import-kihachi` →
+`jobs run` (completed=24 failed=0): `KIHACHI Kick` and `KIHACHI Drums` got
+`909 Core Kit`, `KIHACHI Percussion` got `Percussion Core Kit`, Bass got Operator,
+Chords got Wavetable, and playing the Arrangement peaked every drum track's meter
+(0.78-0.84) with Master at 0.93. Re-running the operation on a loaded track was a
+no-op, and a track holding a Drift was refused without being touched. All Core
+Library racks map pitches 35-50 contiguously, which covers every pitch KIHACHI
+writes (36/39/42/46) and every `DRUM_ROLES` split range, so no note lands on an
+empty pad.
+
+**A MIDI track's `output_meter_level` is not proof of audio — never verify a kit
+with it.** Measured on the same run: the instrument-less `KIHACHI Vocoder` track
+read 0.53 while Master read 0.00 with it soloed, and it kept reading 0.53 with the
+track *muted*. Live shows MIDI note activity on that meter when a track has no
+instrument, so an empty Drum Rack — the exact failure this operation exists to
+prevent — would sail through a meter check. That is why the readback here is device
+presence plus a name match, and it must stay that way. (Measuring the master needs a
+settle pause first; reverb/delay tails from a previous playback otherwise read as a
+false positive, which they did once here at 0.32 before a 0.6 s stop was added.)
+
+The same function backs both the job step and the `apply_live_drum_kit`
+MCP tool, so the two paths cannot drift. Safety is doubled up: the handler refuses
+a track holding a different instrument, and the Remote Script's `load_preset`
+refuses an instrument-category load onto an occupied track on its own. A track
+already holding a candidate kit is treated as done, so resume never stacks a second
+rack. Offline preflight has no browser, so `_ValidationBridge` stands in every name
+`drumkits.ALL_KIT_NAMES` can propose — that checks the walk and the load parameters;
+whether a kit is really installed is a question only the live browser answers.
+
+## The vocoder cannot be wired from here — do not try again
+
+Drums looked like the last gap in the KIHACHI layout, so the obvious next move is to
+give `KIHACHI Vocoder` the same treatment. It does not work, and the reason is Live's
+API rather than a missing feature here. Investigated 2026-08-10 against a running
+Live 12; the KIHACHI-side warning about carrier/modulator routing is **correct and
+should stay**.
+
+A MIDI-driven vocoder needs a synth as the *carrier* and a voice as the *modulator*,
+which means the Vocoder's carrier must be set to **External** and pointed at another
+track. Two things block that:
+
+- **The carrier chooser is not in the LOM.** The device exposes 24 parameters, and
+  every per-mode parameter is there (`Noise Rate`/`Noise Crackle` for Noise,
+  `Lower`/`Upper Pitch Detection` + `Oscillator Pitch`/`Waveform` for Pitch Tracking,
+  `Ext. In Gain` for External) — but the selector that picks the mode is absent, so
+  `set_device_parameter` cannot switch it. Device sidechain *routing* has no API at
+  all, so naming the carrier's source track is impossible regardless.
+- **No shipped preset carries External.** The browser-preset trick that solved drum
+  kits (a preset carrying state the parameter API cannot set) does not apply: all
+  seven Core Library Vocoder presets use Noise (`Chromatic`, `Noise Drums`) or
+  Modulator (`Filterbank`, `Formant ±5`, `Octaves Mod`, `Oct+Six Mod`). None uses
+  External.
+A third blocker — that device presets were unreachable at all — used to be listed
+here and **has since been fixed**; see the browser section below. That fix does not
+change the conclusion, because no preset carries External either way.
+
+What *is* possible is a different feature, not this one: a vocoder on a vocal
+**audio** track. Either `add_native_device("Vocoder")`, or now
+`load_browser_preset(category="audio_effects", path=["Vocoder"], name="Chromatic.adv")`
+— verified loading onto an audio track with `added_device_count: 1`. Loading a preset
+is in fact the only way to *choose* the carrier, since the chooser is not a
+parameter: `Chromatic`/`Noise Drums` land on Noise, the other five on Modulator. None
+of this drives KIHACHI's MIDI vocoder part, which still needs External. The carrier a
+bare insertion lands on cannot be read back, for the same reason it cannot be set.
+
+## A plan may only write to tracks it created
+
+A KIHACHI plan addresses tracks by **absolute index**, but `create_track` *appends*.
+Those two agree only when the plan's `first_track_index` equals the track count the
+Set already had. Nothing enforced that, so the plan's own
+``"modifies_existing_tracks": false`` was a claim rather than a guarantee: run a
+default plan (`first_track_index: 0`) against a Set that already has tracks and
+`apply_live_drum_kit` loads a kit onto an *existing* empty track, while clips go into
+existing tracks' empty slots. The "never replace an instrument" guard does not fire,
+because an empty track has none. Offline preflight cannot catch this — it never sees
+the Set.
+
+`jobs.tracks` closes it. `build_track_expectation` is pure: it reads the plan's lowest
+targeted `track_index` (the base), counts `create_track` steps, and counts how many of
+those already ran. `verify_track_baseline` then does **one read-only `get_state`**
+before the first mutating step and requires `len(tracks) == base + creates_done` —
+exact for both a fresh run and a resume. The CLI runs it in `_execute`, so a mismatch
+returns 1 with nothing touched and the stored statuses unchanged.
+
+Two deliberate limits. It returns "no opinion" (`None`) rather than guessing when a
+`create_track` uses an explicit index instead of appending, because landing position
+then depends on insert order and a wrong guard is worse than none — KIHACHI always
+appends, so its plans are always checkable. And it is skipped for an executor with no
+`bridge`, which is how the existing test fakes stay unaffected; `AbletonStepExecutor`
+exposes `.bridge` for exactly this. `JobRunner` stays Live-free by design, which is
+why the check lives in the CLI rather than inside it.
+
+Verified against a running Live 12 with a 3-track Set: a default-offset plan was
+refused with *"Live has 3 track(s) but this plan was written for a Set with 0 …
+rebuild the plan with --first-track-index 3"*, exit 1, Set unchanged. Rebuilt with
+`--first-track-index 3` it ran 13/13, and the three pre-existing tracks kept their
+exact devices.
+
+## Browsing: a device is not a folder, but you can still descend into it
+
+`_resolve_browser_node` descends a path segment into a folder **or into a device that
+has children**. Live reports a device entry as `is_folder=false` even though its
+presets *are* its `children`, so the original folders-only rule made every device
+preset unreachable — the `audio_effects` root is flat (55 items, zero folders) and
+asking for `path=["Vocoder"]` raised "not found". Drum kits never hit this because
+they sit loadable directly at the `drums` root, which is why it went unnoticed.
+
+Verified against a running Live 12 after the fix: `path=["Vocoder"]` lists all seven
+presets, and `load_browser_preset(..., path=["Vocoder"], name="Chromatic.adv")` loads
+one (`added_device_count: 1`). 45 of the 55 `audio_effects` root items are devices
+with presets.
+
+Three rules keep this safe, and each is tested:
+
+- **A folder wins over a non-folder of the same name**, so a user's own `Reverb`
+  folder is never mistaken for the stock `Reverb` device.
+- **A childless non-folder is still refused.** A preset is a leaf; descending one is a
+  real error and must not silently resolve to something else.
+- **`children` is read through a guard.** It is a live query into Live's browser, and
+  a stale item *raises* rather than returning an empty list. Unreadable means
+  not-descendable, not a crash.
+
+Listings now also carry `is_expandable` (folder, or device with children), because
+`is_folder` alone does not tell a caller what it can descend into. The drum-kit walk
+in `jobs/executors.py` deliberately still recurses on `is_folder` only: kits are all
+at the `drums` root, and following `is_expandable` there would walk back into the
+7689-item `Drum Hits` subtree it was optimised out of.
 
 **Reloading the Remote Script needs a full Live restart.** Re-selecting the
 control surface re-instantiates the class but Python keeps the module in
@@ -46,11 +201,6 @@ under the external drive's `12.４b` User Library — that is
 `/Volumes/NO NAME/12.４b/...`, and the `４` is **full-width**, so a copied-and-pasted
 half-width `12.4b` will not match. Delete `__pycache__` in both (only the external
 copy tends to have one).
-
-**Live loads the external copy.** Updating only the home copy leaves Live running
-the old code through a restart, which reads as "the restart did not work". Check
-the reload actually took by looking for a field the new code adds — `get_state`
-returning `scenes`, not just `scene_count`.
 
 ## Commands
 
@@ -107,6 +257,11 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   (degree progressions, voice-leading via nearest-inversion, density/swing/humanize, `seed`).
 - **`contextual.py`** — read-only analysis of an existing MIDI clip + complementary-part planning.
 - **`instruments.py`** — role/genre/mood → native-instrument selection with ordered fallbacks.
+- **`drumkits.py`** — role/genre/mood → ordered Core Library drum *kit* candidates, the sibling of
+  `instruments.py` for the one role device insertion cannot serve (an inserted Drum Rack is silent).
+  Names only: it never knows a browser path or URI, because that is a fact about the installed Live
+  and is resolved by walking the browser at apply time. Mood re-ranks within a genre's pool and can
+  never promote a kit the genre did not list. Pure, stdlib-only, deterministic.
 - **`vocal.py`** — lyrics → editable Vocal Guide MIDI and the external-render handoff contract.
 - **`loudness.py`** — offline BS.1770 / EBU R128 analysis of WAV/AIFF; reads the file, never writes.
   Not stdlib-only any more: with FFmpeg installed it measures through FFmpeg's native `ebur128`
@@ -219,18 +374,6 @@ Pure logic engines (no Live connection, deterministic, unit-testable in isolatio
   a section carries and *what change* it deserves, so the same material can be developed with intent
   rather than repeated verbatim. Reuses `layering.section_archetype`. Read-only plan
   (`plan_narrative_arc`); a create/apply tool consumes the directives. Pure, stdlib-only.
-- **`develop.py`** — `build_developed_arrangement(clip_data, structure, section_repeats, seed)`
-  develops one MIDI loop into a *narrative* arrangement. Where `phrase.py` tiles a loop verbatim,
-  this reads the narrative arc (`narrative.build_narrative_arc`) and rebuilds the loop **differently
-  in every section** per that section's directives: density (thin the intro / fill the chorus),
-  register (octave-double the chorus top / drop the breakdown's low voices), velocity (toward the
-  section's target with a crescendo/pull-back shape), `vary` (deterministically thin a returning
-  section so it differs), and a motion fill into the next section. The transformed sections are
-  concatenated into one long clip, so a single loop becomes a full arrangement with a rise, a peak
-  and a release. Note count/length grow, so this is a plan/**create** (not in-place): the
-  `plan_/create_developed_arrangement` pair writes into an empty slot via the non-overwriting
-  `create_midi_clip` with a source-fingerprint guard. Deterministic (same loop + structure + seed →
-  same arrangement). Pure, stdlib-only.
 - **`timescale.py`** — `build_timescale_plan` scales every note's start/duration and the clip
   length by a factor: 2.0 = half-time (slower/longer), 0.5 = double-time (faster/shorter);
   `factor_for` maps the `"half"`/`"double"` modes. Pitch/velocity/probability and the note count

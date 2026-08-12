@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.14"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Validate installed dependencies
+        run: python -m pip check
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+  # scripts/run_checks.py is the path for contributors without dev deps. It only
+  # guards anything if it is exercised without them, so this job installs the
+  # base package alone -- no pytest, no NumPy.
+  base-install:
+    name: Fallback checks on a base install
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the package without dev extras
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Run the no-dev-deps checks
+        run: python scripts/run_checks.py
+
+  package:
+    name: Build and smoke-test the wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the build front end
+        run: python -m pip install --upgrade pip build
+
+      - name: Build source and wheel distributions
+        run: python -m build
+
+      # Installed outside the checkout, so a missing packaged module fails here
+      # instead of being masked by the source tree sitting on sys.path.
+      - name: Smoke-test the built wheel outside the checkout
+        run: |
+          python -m venv /tmp/abletongpt-wheel-smoke
+          cd /tmp
+          /tmp/abletongpt-wheel-smoke/bin/python -m pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          /tmp/abletongpt-wheel-smoke/bin/abletongpt-cli compose \
+            --title "CI Smoke" --genre edm --mood dark \
+            --key D --mode minor --tempo 124 --bars 8 --json > /tmp/compose-smoke.json
+          /tmp/abletongpt-wheel-smoke/bin/python -c "import json, sys; names = [t['name'] for t in json.load(open('/tmp/compose-smoke.json'))['tracks']]; sys.exit(0 if names == ['Chords', 'Bass', 'Melody', 'Drums'] else 'unexpected tracks: %s' % names)"
+          /tmp/abletongpt-wheel-smoke/bin/abletongpt-doctor --help > /dev/null

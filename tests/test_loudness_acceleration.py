@@ -6,6 +6,8 @@ import subprocess
 import wave
 from pathlib import Path
 
+import pytest
+
 from abletongpt import loudness
 
 
@@ -97,3 +99,43 @@ def test_ffmpeg_failure_falls_back_to_portable_python(
         "fallback": True,
     }
     assert result["measurements"]["integrated_lufs"] is not None
+
+
+def test_engine_python_never_reaches_ffmpeg(monkeypatch, tmp_path):
+    """A pinned engine is what makes two measurements comparable.
+
+    `auto` picks whichever binary the machine happens to have, and the engines
+    disagree by ~0.1 dB of true peak, so a report taken for comparison has to be
+    able to name its engine and get it.
+    """
+    called: list[str] = []
+    monkeypatch.setattr(
+        loudness, "_analyze_loudness_with_ffmpeg",
+        lambda **kwargs: called.append("ffmpeg") or {"analysis_engine": {"name": "ffmpeg"}},
+    )
+
+    result = loudness.analyze_loudness_file(_write_tone(tmp_path / "tone.wav"), engine="python")
+
+    assert called == []
+    assert result["analysis_engine"]["name"] == "python"
+
+
+def test_engine_ffmpeg_refuses_instead_of_falling_back(monkeypatch, tmp_path):
+    """Falling back would return the other engine's number under this one's name."""
+    monkeypatch.setattr(loudness, "_analyze_loudness_with_ffmpeg", lambda **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="FFmpeg is unavailable"):
+        loudness.analyze_loudness_file(_write_tone(tmp_path / "tone.wav"), engine="ffmpeg")
+
+
+def test_an_unknown_engine_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="engine must be one of"):
+        loudness.analyze_loudness_file(_write_tone(tmp_path / "tone.wav"), engine="sox")
+
+
+def test_both_engines_warn_that_they_disagree(monkeypatch, tmp_path):
+    monkeypatch.setattr(loudness, "_analyze_loudness_with_ffmpeg", lambda **kwargs: None)
+
+    report = loudness.analyze_loudness_file(_write_tone(tmp_path / "tone.wav"), engine="auto")
+
+    assert any("engine" in note for note in report["quality_notes"])

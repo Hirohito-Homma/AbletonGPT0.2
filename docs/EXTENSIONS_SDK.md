@@ -225,3 +225,57 @@ Confirm: real track names come back; the clip's notes come back; after
 
 Once connectivity is confirmed, set the same `ABLETONGPT_EXTENSIONS_TOKEN` on both
 sides (the Live-side shell and the Python side) for real use.
+
+## What the SDK can and cannot do (read from the 1.0.0-beta.0 type definitions)
+
+Audited 2026-08-13 against `ableton-extensions-sdk-1.0.0-beta.0`'s
+`index.d.mts` — the shipped API surface, not a guess from documentation. This
+decides which features could ever move to this backend, and it is not a subset
+relationship in either direction: the SDK does things the Remote Script cannot,
+and vice versa.
+
+### The SDK does things the Live Object Model will not
+
+- **`song.createCuePoint(time)` places a locator at an arbitrary position.**
+  This is the single biggest difference. The Remote Script cannot do it: the LOM
+  exposes only `set_or_delete_cue()`, a toggle at the playhead, and
+  `CuePoint.time` is read-only. That is why locator placement here drives three
+  bridge calls per locator (`jump_transport` → `get_transport_state` →
+  `toggle_cue_at_playhead`) and has to refuse when the transport has not arrived
+  yet. On the SDK that whole mechanism collapses into one call.
+- **`Scene.name` is writable.** The Remote Script cannot rename a scene, which
+  is why `place_scene` can only resolve names a human typed into Live.
+- `song.createScene(index)`, `duplicateScene`, `duplicateTrack`.
+
+### The SDK cannot reach the browser at all
+
+There is **no browser, preset, or library API** — the words appear only in doc
+comments. `track.insertDevice(deviceName, index)` inserts a native device *with
+its default preset*, which is exactly the case this project already treats as a
+failure: an empty Drum Rack is silent. `apply_live_drum_kit` works by walking
+the read-only `browse_presets` tree and calling `load_preset`, and **neither has
+an equivalent here**. Drum kits cannot be loaded through the Extensions backend.
+
+Also absent: any session-clip → arrangement copy. `songDuplicateScene`
+duplicates a scene *within the Session*; `copy_session_clip_to_arrangement` and
+`copy_scene_to_arrangement` have no counterpart. Arrangement clips can only be
+built from scratch (`MidiTrack.createMidiClip(startTime, duration)`), which is a
+different operation from copying a reviewed Session clip.
+
+Clip automation envelopes are absent too, so `set_clip_parameter_envelope` and
+`set_clip_send_envelope` do not port.
+
+### The SDK exposes destructive operations — do not wire them up
+
+`deleteTrack`, `deleteScene`, `deleteClip`, `deleteCuePoint` and device deletion
+all exist. The **no destructive operations** invariant is a decision about this
+project, not a limitation inherited from the Remote Script, so it holds on this
+backend as well. None of these may be exposed as a tool.
+
+### Consequence
+
+The Extensions backend is not a migration target as things stand: the drum-kit
+path and every Session→Arrangement copy would be lost, and those are load-bearing.
+It is worth revisiting only for locator placement, where it removes a
+three-call-per-locator workaround that exists solely because the LOM has no way
+to create a cue at a given time.

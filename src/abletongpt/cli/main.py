@@ -23,8 +23,11 @@ from . import (
     contextual,
     expression,
     instruments,
+    intent,
     jobs,
+    live_flow,
     loudness,
+    ui,
     vocal,
 )
 
@@ -34,6 +37,11 @@ _Handler = Callable[[list], int]
 #: Ordered map of subcommand name -> (delegate ``main``, one-line help).
 _SUBCOMMANDS: Dict[str, Tuple[_Handler, str]] = {
     "compose": (compose.main, "Generate a deterministic multi-track song sketch."),
+    "intent": (
+        intent.main,
+        "Turn a natural-language request into a SongSpec draft.",
+    ),
+    "ui": (ui.main, "Launch the local AbletonGPT Studio web UI."),
     "contextual": (
         contextual.main,
         "Analyze an existing MIDI clip or plan a complementary part.",
@@ -41,6 +49,10 @@ _SUBCOMMANDS: Dict[str, Tuple[_Handler, str]] = {
     "instruments": (
         instruments.main,
         "Select native instruments for a role / genre / mood.",
+    ),
+    "live-flow": (
+        live_flow.main,
+        "Create MIDI tracks and insert instruments through the Live flow.",
     ),
     "expression": (
         expression.main,

@@ -179,6 +179,99 @@ def build_locators_from_structure(
     return {"tempo": tempo, "locators": locators, "count": len(locators)}
 
 
+MAX_LOCATORS = 256
+"""The Remote Script rejects more than this per ``add_locators`` call."""
+
+
+def build_locators_from_sections(
+    sections: list[dict[str, Any]],
+    *,
+    time_signature: str = "4/4",
+    include_end: bool = False,
+) -> dict[str, Any]:
+    """Convert an explicit section list into Arrangement-locator positions.
+
+    The audio-driven :func:`build_locators_from_structure` has to *detect* where
+    sections are and needs a tempo to turn seconds into beats. When the sections
+    are already known -- from a composed arrangement rather than from a render --
+    neither is true: bar numbers convert to beats through the time signature
+    alone, so the result does not depend on tempo at all.
+
+    Each section is ``{"name": str, "start_bar": int}`` with ``start_bar``
+    one-based, plus ``length_bars`` when ``include_end`` is wanted. Sections must
+    be ordered and must not share a start bar.
+    """
+
+    if not isinstance(sections, list) or not sections:
+        raise ValueError("sections must be a non-empty list")
+    if len(sections) > MAX_LOCATORS:
+        raise ValueError("too many sections (max %d per call)" % MAX_LOCATORS)
+
+    beats_per_bar = _beats_per_bar(time_signature)
+    locators: list[dict[str, Any]] = []
+    previous_bar: int | None = None
+    for index, section in enumerate(sections):
+        if not isinstance(section, dict):
+            raise ValueError("each section must be an object")
+        try:
+            start_bar = int(section["start_bar"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("each section needs an integer start_bar") from None
+        if start_bar < 1:
+            raise ValueError("start_bar is one-based and must be at least 1")
+        if previous_bar is not None and start_bar <= previous_bar:
+            raise ValueError("sections must be ordered by start_bar without duplicates")
+        previous_bar = start_bar
+        # No index prefix. The number would be per *call*, so placing sections
+        # in two calls restarts it at 1 -- which is how a set ended up with a
+        # fourth locator named "1 mutation_build_1". Section names are already
+        # distinct, and Live orders locators by time, so the number carried
+        # nothing the timeline did not already show.
+        name = str(section.get("name") or "Section %d" % (index + 1))[:100]
+        locators.append(
+            {
+                "name": name,
+                "start_bar": start_bar,
+                "time_beats": round((start_bar - 1) * beats_per_bar, 6),
+            }
+        )
+
+    if include_end:
+        last = sections[-1]
+        if "length_bars" not in last:
+            raise ValueError("include_end needs length_bars on the final section")
+        length_bars = int(last["length_bars"])
+        if length_bars <= 0:
+            raise ValueError("length_bars must be positive")
+        end_bar = int(last["start_bar"]) + length_bars
+        locators.append(
+            {
+                "name": "End",
+                "start_bar": end_bar,
+                "time_beats": round((end_bar - 1) * beats_per_bar, 6),
+            }
+        )
+
+    return {
+        "time_signature": time_signature,
+        "beats_per_bar": beats_per_bar,
+        "locators": locators,
+        "count": len(locators),
+    }
+
+
+def _beats_per_bar(time_signature: str) -> float:
+    try:
+        numerator_text, denominator_text = str(time_signature).split("/", 1)
+        numerator = int(numerator_text)
+        denominator = int(denominator_text)
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError("invalid time signature: %r" % (time_signature,)) from None
+    if numerator <= 0 or denominator <= 0:
+        raise ValueError("invalid time signature: %r" % (time_signature,))
+    return numerator * (4.0 / denominator)
+
+
 def _parse_chord(label: str):
     """Parse a chord label like ``C``/``Cm``/``F#`` into ``(root_pc, quality)`` or ``None``.
 
