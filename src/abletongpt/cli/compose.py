@@ -3,10 +3,12 @@
     python -m abletongpt.cli.compose --title Demo --genre pop --mood bright \
         --key C --mode major --tempo 120 --bars 8
     python -m abletongpt.cli.compose ... --complexity seventh --seed 7 --json
+    python -m abletongpt.cli.compose ... --spec-yaml
 
 Pure generation: this runs the deterministic :func:`abletongpt.composition.build_song_plan`
 engine (chords / bass / melody / drums) and prints the result -- a human summary, or the
-full plan as JSON with ``--json``. It reads no files and never touches Ableton.
+full plan as JSON with ``--json``, or a hand-editable SongSpec YAML with ``--spec-yaml``.
+It reads no files and never touches Ableton.
 """
 
 from __future__ import annotations
@@ -17,21 +19,26 @@ import sys
 
 from ..composition import (
     CHORD_SIZES,
+    GENRE_ALIASES,
     GENRE_PROFILES,
     MOOD_PROGRESSIONS,
     PITCH_CLASSES,
     SCALES,
     build_song_plan,
 )
+from ..songspec import build_song_spec_from_plan, song_spec_to_dict, song_spec_to_yaml
 
 #: Bar counts the composition engine accepts.
-_BARS_CHOICES = (4, 8, 16, 32)
+_BARS_CHOICES = (4, 8, 16, 32, 64)
+_GENRE_CHOICES = tuple(sorted(set(GENRE_PROFILES) | set(GENRE_ALIASES)))
 
 
 def _print_plan(plan: dict, *, as_json: bool) -> None:
     """Print a song plan as JSON or a human-readable summary."""
     if as_json:
-        print(json.dumps(plan, indent=2, sort_keys=True, ensure_ascii=False))
+        payload = dict(plan)
+        payload["song_spec"] = song_spec_to_dict(build_song_spec_from_plan(plan))
+        print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
         return
 
     settings = plan["professional_settings"]
@@ -81,6 +88,9 @@ def _cmd_compose(args: argparse.Namespace) -> int:
         # (tempo, density, swing, humanize) with a clean message instead of a traceback.
         print("compose: %s" % exc, file=sys.stderr)
         return 2
+    if args.spec_yaml:
+        print(song_spec_to_yaml(build_song_spec_from_plan(plan)))
+        return 0
     _print_plan(plan, as_json=args.json)
     return 0
 
@@ -92,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--title", required=True, help="Song title.")
     parser.add_argument(
-        "--genre", required=True, choices=sorted(GENRE_PROFILES), help="Musical genre."
+        "--genre", required=True, choices=_GENRE_CHOICES, help="Musical genre."
     )
     parser.add_argument(
         "--mood", required=True, choices=sorted(MOOD_PROGRESSIONS), help="Overall mood."
@@ -143,6 +153,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit the full song plan as machine-readable JSON on stdout.",
+    )
+    parser.add_argument(
+        "--spec-yaml",
+        action="store_true",
+        help="Emit the SongSpec core as a small YAML document for hand editing.",
     )
     parser.set_defaults(func=_cmd_compose)
     return parser

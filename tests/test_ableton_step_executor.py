@@ -54,6 +54,7 @@ class FakeBridge:
                 "is_playing": self._is_playing,
                 "tempo": self._tempo,
                 "tracks": self._tracks,
+                "scenes": ["intro", "drop", "outro"],
             }
         if command == "get_track_devices":
             return {"track_index": params["track_index"], "devices": list(self.devices)}
@@ -86,6 +87,7 @@ class FakeBridge:
             "create_track",
             "set_clip_envelope",
             "copy_session_clip_to_arrangement",
+            "copy_scene_to_arrangement",
         }:
             return {"ok": True}
         raise AssertionError("unexpected bridge command: %s" % command)
@@ -109,6 +111,7 @@ def test_executor_satisfies_step_executor_protocol():
         "create_midi_clip",
         "set_clip_send_envelope",
         "copy_session_clip_to_arrangement",
+        "place_scene",
     }
 
 
@@ -233,6 +236,36 @@ def test_kihachi_core_operations_map_to_the_existing_bridge_protocol():
                 "clip_index": 0,
                 "destination_time_beats": 0.0,
                 "name": "KIHACHI Chords",
+            },
+        ),
+    ]
+
+
+def test_place_scene_uses_scene_name_to_copy_scene_to_arrangement():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "00_place_scene_drop",
+            "place_scene",
+            {
+                "source_scene": "drop",
+                "start_bar": 4,
+                "length_bars": 8,
+                "transition": "fill",
+            },
+        )
+    )
+
+    assert bridge.calls == [
+        ("get_state", {}),
+        (
+            "copy_scene_to_arrangement",
+            {
+                "scene_index": 1,
+                "destination_time_beats": 16.0,
+                "track_indices": None,
             },
         ),
     ]

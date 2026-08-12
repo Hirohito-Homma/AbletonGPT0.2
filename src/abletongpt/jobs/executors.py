@@ -580,6 +580,53 @@ def _copy_session_clip_to_arrangement(
     )
 
 
+def _resolve_scene_index(bridge: SupportsBridgeCall, source_scene: str) -> int:
+    """Return the Live scene index for a canonical source_scene name."""
+    state = bridge.call("get_state")
+    scenes = state.get("scenes", []) if isinstance(state, Mapping) else []
+    if not isinstance(scenes, list):
+        raise RuntimeError("get_state returned an invalid scene list")
+    normalized = source_scene.strip().lower()
+    for index, name in enumerate(scenes):
+        if isinstance(name, str) and name.strip().lower() == normalized:
+            return index
+    raise ValueError("source scene %r not found in Live set" % source_scene)
+
+
+def _place_scene(bridge: SupportsBridgeCall, params: dict) -> Any:
+    """Copy an existing Session scene into the Arrangement at the requested bar."""
+    _exact_params(
+        params,
+        required=("source_scene", "start_bar", "length_bars"),
+        optional=("transition",),
+    )
+    source_scene = params["source_scene"]
+    if not isinstance(source_scene, str) or not source_scene.strip():
+        raise ValueError("source_scene must be a non-empty string")
+    start_bar = params["start_bar"]
+    length_bars = params["length_bars"]
+    if isinstance(start_bar, bool) or not isinstance(start_bar, int):
+        raise ValueError("start_bar must be an integer")
+    if start_bar < 0:
+        raise ValueError("start_bar must be non-negative")
+    if isinstance(length_bars, bool) or not isinstance(length_bars, int):
+        raise ValueError("length_bars must be an integer")
+    if length_bars <= 0:
+        raise ValueError("length_bars must be positive")
+    transition = params.get("transition", "none")
+    if not isinstance(transition, str):
+        raise ValueError("transition must be a string")
+
+    scene_index = _resolve_scene_index(bridge, source_scene)
+    destination_time_beats = float(start_bar) * 4.0
+    return bridge.call(
+        "copy_scene_to_arrangement",
+        scene_index=scene_index,
+        destination_time_beats=destination_time_beats,
+        track_indices=None,
+    )
+
+
 class AbletonStepExecutor:
     """Connects a :class:`JobStep` to real Ableton operations via the bridge.
 
@@ -606,6 +653,7 @@ class AbletonStepExecutor:
         "create_midi_clip": _create_midi_clip,
         "set_clip_send_envelope": _set_clip_send_envelope,
         "copy_session_clip_to_arrangement": _copy_session_clip_to_arrangement,
+        "place_scene": _place_scene,
     }
 
     def __init__(self, bridge: SupportsBridgeCall | None = None) -> None:

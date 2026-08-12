@@ -7,6 +7,7 @@ from abletongpt.drumkits import (
     SUPPORTED_KIT_ROLES,
     build_drum_kit_selection,
 )
+from abletongpt.composition import GENRE_PROFILES
 from abletongpt.instruments import INSTRUMENTS
 
 
@@ -79,9 +80,10 @@ def test_preferred_kit_is_not_duplicated_when_it_is_already_a_candidate():
 
 
 def test_every_genre_and_role_yields_candidates():
-    for genre in ("pop", "rock", "edm", "hiphop", "rnb", "jazz", "lofi"):
+    for genre in GENRE_PROFILES:
         for role in sorted(SUPPORTED_KIT_ROLES):
             selection = build_drum_kit_selection(genre, "dark", role)
+            assert selection["genre"] == genre
             assert selection["candidates"]
             assert len(selection["candidates"]) == len(set(selection["candidates"]))
 

@@ -16,7 +16,8 @@ from abletongpt.cli.main import _SUBCOMMANDS, main
 
 def test_every_subcommand_maps_to_a_real_delegate():
     for name, (handler, help_text) in _SUBCOMMANDS.items():
-        module = __import__("abletongpt.cli.%s" % name, fromlist=["main"])
+        # A hyphenated command name (``live-flow``) delegates to the underscored module.
+        module = __import__("abletongpt.cli.%s" % name.replace("-", "_"), fromlist=["main"])
         assert handler is module.main
         assert help_text.strip()
 
@@ -75,6 +76,19 @@ def test_dispatches_compose_and_passes_arguments_through(capsys):
     plan = json.loads(capsys.readouterr().out)
     assert plan["title"] == "Demo"
     assert plan["tempo"] == 120
+
+
+def test_dispatches_intent_prompt_to_song_spec(capsys):
+    rc = main([
+        "intent",
+        "--json",
+        "110 BPM, D# minor, Mutation Funk, Dub, Tech House, 5 minutes",
+    ])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tempo"] == 110.0
+    assert payload["mode"] == "minor"
 
 
 def test_subcommand_help_reaches_the_delegate(capsys):
