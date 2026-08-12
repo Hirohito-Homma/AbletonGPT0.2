@@ -87,6 +87,17 @@ def _run_flow(roles: list[str], *, genre: str = "tech_house", mood: str = "dark"
     }
 
 
+def _device_names(item: dict[str, Any]) -> list[str]:
+    """Return just the device names from one result entry, in chain order."""
+    names: list[str] = []
+    for device in item.get("devices") or []:
+        if isinstance(device, dict):
+            names.append(str(device.get("name", "?")))
+        else:
+            names.append(str(device))
+    return names
+
+
 def _print_result(result: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
@@ -94,8 +105,13 @@ def _print_result(result: dict[str, Any], *, as_json: bool) -> None:
     print(f"genre={result['genre']} mood={result['mood']}")
     for item in result["results"]:
         status = "OK" if item.get("ok") else "FAIL"
-        devices = item.get("devices") or []
-        print(f"  [{status}] track={item['track_index']} role={item['role']} devices={devices}")
+        # Only the device *names*: get_track_devices returns every parameter of every
+        # device, which is ~40 KB per track against a real Live and buries the status.
+        names = ", ".join(_device_names(item)) or "none"
+        print(f"  [{status}] track={item['track_index']} role={item['role']} devices={names}")
+        error = item.get("error")
+        if error:
+            print(f"         {error}")
 
 
 def build_parser() -> argparse.ArgumentParser:

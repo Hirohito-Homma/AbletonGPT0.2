@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from abletongpt.cli.live_flow import _run_flow
+from abletongpt.cli.live_flow import _print_result, _run_flow
 
 
 def test_run_flow_marks_success_when_tracks_report_live_devices(monkeypatch):
@@ -37,3 +37,40 @@ def test_run_flow_marks_success_when_tracks_report_live_devices(monkeypatch):
     assert len(result["results"]) == 3
     assert [item["role"] for item in result["results"]] == ["bass", "chords", "drums"]
     assert all(item["ok"] for item in result["results"])
+
+
+def test_summary_prints_device_names_not_the_parameter_dump(capsys):
+    """A real ``get_track_devices`` entry carries every parameter of the device.
+
+    Printing the raw list put ~40 KB per track on stdout against a running Live and
+    buried the one thing the summary exists to show.
+    """
+    live_shaped_device = {
+        "index": 0,
+        "name": "Operator",
+        "class_name": "Operator",
+        "is_active": True,
+        "parameters": [
+            {"index": i, "name": "Param %d" % i, "value": 0.5, "display_value": "50 %"}
+            for i in range(64)
+        ],
+    }
+    result = {
+        "genre": "tech_house",
+        "mood": "dark",
+        "roles": ["bass", "melody"],
+        "all_ok": False,
+        "results": [
+            {"track_index": 1, "role": "bass", "name": "Bass", "ok": True, "devices": [live_shaped_device]},
+            {"track_index": 2, "role": "melody", "name": "Melody", "ok": False, "error": "Live refused the insert"},
+        ],
+    }
+
+    _print_result(result, as_json=False)
+
+    out = capsys.readouterr().out
+    assert "[OK] track=1 role=bass devices=Operator" in out
+    assert "[FAIL] track=2 role=melody devices=none" in out
+    assert "Live refused the insert" in out
+    assert "display_value" not in out
+    assert len(out) < 400
