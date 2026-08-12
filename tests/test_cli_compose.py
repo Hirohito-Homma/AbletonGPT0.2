@@ -11,6 +11,7 @@ import json
 import pytest
 
 from abletongpt.cli.compose import main
+from abletongpt.composition import build_song_plan
 
 
 _BASE = [
@@ -48,6 +49,8 @@ def test_compose_json_is_machine_readable_and_deterministic(capsys):
     assert first["title"] == "Demo"
     assert first["bars"] == 8
     assert [t["role"] for t in first["tracks"]] == ["chords", "bass", "melody", "drums"]
+    assert first["song_spec"]["version"] == "0.1"
+    assert first["song_spec"]["tracks"][1]["role"] == "bass"
     # Same seed -> identical plan (deterministic engine).
     assert first == second
 
@@ -94,3 +97,59 @@ def test_compose_rejects_invalid_key_via_argparse():
                 "--bars", "8",
             ]
         )
+
+
+def test_compose_spec_yaml_exposes_a_human_editable_song_spec(capsys):
+    rc = main([*_BASE, "--seed", "7", "--spec-yaml"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "version: 0.1" in out
+    assert "title: Demo" in out
+    assert "tracks:" in out
+    assert "role: bass" in out
+
+
+def test_compose_supports_64_bar_song_sketches(capsys):
+    rc = main([
+        "--title", "Long Demo",
+        "--genre", "pop",
+        "--mood", "bright",
+        "--key", "C",
+        "--mode", "major",
+        "--tempo", "120",
+        "--bars", "64",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["bars"] == 64
+    assert payload["song_spec"]["bars"] == 64
+
+
+def test_compose_cli_accepts_songspec_style_genre_alias(capsys):
+    rc = main([
+        "--title", "Demo",
+        "--genre", "dub_techno",
+        "--mood", "bright",
+        "--key", "C",
+        "--mode", "major",
+        "--tempo", "120",
+        "--bars", "8",
+        "--json",
+    ])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["genre"] == "dub_techno"
+    assert payload["song_spec"]["genre"] == "dub_techno"
+    assert payload["professional_settings"]["requested_genre"] == "dub_techno"
+
+
+@pytest.mark.parametrize("genre", ["tech_house", "dub_techno"])
+def test_build_song_plan_normalizes_songspec_style_genres(genre):
+    plan = build_song_plan("Demo", genre, "bright", "C", "major", 120, 8)
+
+    assert plan["genre"] == genre
+    assert plan["professional_settings"]["requested_genre"] == genre
