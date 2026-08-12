@@ -446,10 +446,10 @@ Script. New tools must uphold them:
 
 ## Testing note
 
-`uv run pytest` runs the whole suite (74 files, ~766 tests). `scripts/run_checks.py` is a separate,
+`uv run pytest` runs the whole suite (81 files, ~813 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
-smoke test of every module. Its printed total adds a hardcoded `+ 51` for those import checks, so
+smoke test of every module. Its printed total adds a hardcoded `+ 57` for those import checks, so
 **when you add a module, add it to that list and bump the constant**. Most new test files belong in
 the pytest suite only; wire one into `run_checks.py` just when its checks must survive without dev
 deps.
