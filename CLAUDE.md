@@ -24,13 +24,15 @@ command; removing a return is a manual action in Live.
 
 KIHACHI plans enter through `jobs import-kihachi`, which is a pure preflight: it
 accepts plan version 0.1, `planned_not_applied`, the existing `set_tempo`, and only
-the five additive core operations (`create_track`, `apply_live_instrument_selection`,
-`create_midi_clip`, `set_clip_send_envelope`, `copy_session_clip_to_arrangement`).
+the six additive core operations (`create_track`, `apply_live_instrument_selection`,
+`apply_live_drum_kit`, `create_midi_clip`, `set_clip_send_envelope`,
+`copy_session_clip_to_arrangement`).
 Instrument selection accepts a semantic role/genre/mood, then AbletonGPT owns the
 native-device candidates and sends `insert_first_available_instrument` to Live.
 Resume accepts one candidate-matching instrument; a different existing instrument
-is never replaced. Drums stay outside this operation until an actual kit preset is
-resolved, because an empty Drum Rack or Impulse is silent. The resulting saved
+is never replaced. Drums stay outside *instrument selection* — an empty Drum Rack or
+Impulse is silent — and go through `apply_live_drum_kit`, which discovers a real kit
+by walking the read-only browser and verifies the readback. The resulting saved
 JobPlan remains pending until a separate `jobs run`/`resume`; unknown operations or
 bad parameters reject the whole import before any Live bridge call.
 
@@ -40,7 +42,15 @@ control surface re-instantiates the class but Python keeps the module in
 time not moving. The script is installed in *two* places on this machine and both
 have to be updated:
 `~/Music/Ableton/User Library/Remote Scripts/AbletonGPT_MCP/` and the same path
-under the external drive's `12.4b` User Library. Delete `__pycache__` in both.
+under the external drive's `12.４b` User Library — that is
+`/Volumes/NO NAME/12.４b/...`, and the `４` is **full-width**, so a copied-and-pasted
+half-width `12.4b` will not match. Delete `__pycache__` in both (only the external
+copy tends to have one).
+
+**Live loads the external copy.** Updating only the home copy leaves Live running
+the old code through a restart, which reads as "the restart did not work". Check
+the reload actually took by looking for a field the new code adds — `get_state`
+returning `scenes`, not just `scene_count`.
 
 ## Commands
 
@@ -293,10 +303,10 @@ Script. New tools must uphold them:
 
 ## Testing note
 
-`uv run pytest` runs the whole suite (72 files, ~733 tests). `scripts/run_checks.py` is a separate,
+`uv run pytest` runs the whole suite (81 files, ~813 tests). `scripts/run_checks.py` is a separate,
 deliberately narrow path for contributors without dev deps: it hand-runs `tests/test_bridge.py` and
 `tests/test_remote_script_runtime.py` — the two files whose checks need no pytest — plus an import
-smoke test of every module. Its printed total adds a hardcoded `+ 51` for those import checks, so
+smoke test of every module. Its printed total adds a hardcoded `+ 57` for those import checks, so
 **when you add a module, add it to that list and bump the constant**. Most new test files belong in
 the pytest suite only; wire one into `run_checks.py` just when its checks must survive without dev
 deps.
