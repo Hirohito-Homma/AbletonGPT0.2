@@ -96,10 +96,25 @@ def _treatment(gain_db: float) -> str:
     return "neutral"
 
 
-def _normalized_balance(multipliers: dict[str, float]) -> dict[str, float]:
-    scaled = {band: _NEUTRAL_BALANCE[band] * multipliers[band] for band in BANDS}
+def _normalized_balance(gains: dict[str, float]) -> dict[str, float]:
+    """The balance that the *reported* EQ moves produce.
+
+    Derived from the clamped ``gain_db`` rather than the archetype's raw
+    multiplier, because those disagree wherever the clamp bites: the intro asks
+    for 0.40x on the low band, which is -7.96 dB, and the report offers -6 dB.
+    Reading the balance off the raw multiplier described a cut deeper than the
+    one it told you to make.
+    """
+
+    scaled = {band: _NEUTRAL_BALANCE[band] * (10.0 ** (gains[band] / 20.0)) for band in BANDS}
     total = sum(scaled.values()) or 1.0
-    return {band: round(scaled[band] / total, 4) for band in BANDS}
+    balance = {band: round(scaled[band] / total, 4) for band in BANDS}
+    # Rounding five fractions independently loses up to 5e-5 of the whole, and
+    # these are compared against `targets.py` profiles that do sum to 1.0. The
+    # residual goes on the largest band, where it is smallest in relative terms.
+    largest = max(BANDS, key=lambda band: balance[band])
+    balance[largest] = round(balance[largest] + (1.0 - sum(balance.values())), 4)
+    return balance
 
 
 def _width_label(width: float) -> str:
@@ -154,7 +169,7 @@ def build_section_spectral_plan(structure: list[str]) -> dict[str, Any]:
         multipliers = profile["bands"]
         gains = {band: _gain_db(multipliers[band]) for band in BANDS}
         treatments = {band: _treatment(gains[band]) for band in BANDS}
-        balance = _normalized_balance(multipliers)
+        balance = _normalized_balance(gains)
         # Blend the archetype's base width with the section's energy so a bigger moment opens wider.
         width = round(max(0.0, min(1.0, 0.7 * float(profile["width"]) + 0.3 * energy)), 3)
         width_label = _width_label(width)
