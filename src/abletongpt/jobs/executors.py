@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from ..bridge import AbletonBridge, AbletonConnectionError
@@ -551,6 +552,113 @@ def _set_clip_send_envelope(bridge: SupportsBridgeCall, params: dict) -> Any:
     )
 
 
+def _set_clip_parameter_envelope(bridge: SupportsBridgeCall, params: dict) -> Any:
+    """Step envelope for a device parameter, rather than for a send.
+
+    The only structural difference from the send version is the target, but the
+    value rule is not the same and cannot be. A send runs 0..1 and is checked
+    here. A device parameter runs whatever Live says it runs -- 0..127 for a
+    Drum Rack gain, -48..48 for an Operator transpose -- and preflight has no
+    Live to ask. So the range check stays where the range is known, in the
+    Remote Script, and this checks only what is knowable offline.
+
+    That gap is real and worth naming: a value in the wrong units is accepted
+    here, accepted by Live, and lands in the wrong place. KIHACHI writes these
+    in the parameter's own units for exactly that reason.
+    """
+
+    _exact_params(
+        params,
+        required=("track_index", "clip_index", "device_index", "parameter_index", "steps"),
+    )
+    track_index = _non_negative_index(params["track_index"], "track_index")
+    clip_index = _non_negative_index(params["clip_index"], "clip_index")
+    device_index = _non_negative_index(params["device_index"], "device_index")
+    parameter_index = _non_negative_index(params["parameter_index"], "parameter_index")
+    steps = params["steps"]
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("steps must be a non-empty list")
+    if len(steps) > 512:
+        raise ValueError("steps must contain at most 512 entries")
+    for position, step in enumerate(steps):
+        if not isinstance(step, Mapping):
+            raise ValueError("step %d must be an object" % position)
+        _exact_params(step, required=("start", "length", "value"))
+        start = _finite_number(step["start"], "step start")
+        length = _finite_number(step["length"], "step length")
+        _finite_number(step["value"], "step value")
+        if start < 0:
+            raise ValueError("step start must be non-negative")
+        if length <= 0:
+            raise ValueError("step length must be positive")
+    # Both envelope kinds share the Remote Script's set_clip_envelope command;
+    # the target is what differs, device_index/parameter_index against send_index.
+    return bridge.call(
+        "set_clip_envelope",
+        track_index=track_index,
+        clip_index=clip_index,
+        device_index=device_index,
+        parameter_index=parameter_index,
+        steps=steps,
+    )
+
+
+AUDIO_IMPORT_SUFFIXES = frozenset({".wav", ".aif", ".aiff", ".flac", ".mp3"})
+
+
+def _import_vocal_take(bridge: SupportsBridgeCall, params: dict) -> Any:
+    """Bring a rendered audio file in on a new audio track of its own.
+
+    Named for where it came from rather than for what it takes: KIHACHI uses it
+    for reference renders and for material cut out of them, not only for vocals.
+
+    The file check runs during preflight too, and that is the point of putting it
+    here -- a missing sample is found before the plan creates a single track,
+    rather than after eleven operations have already run.
+    """
+
+    _exact_params(
+        params,
+        required=("file_path",),
+        optional=("track_name", "clip_name", "clip_index"),
+    )
+    file_path = params["file_path"]
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise ValueError("file_path must be a non-empty string")
+    path = Path(file_path).expanduser()
+    if not path.is_file():
+        raise ValueError("audio file does not exist: %s" % file_path)
+    if path.suffix.lower() not in AUDIO_IMPORT_SUFFIXES:
+        raise ValueError(
+            "unsupported audio format %r; expected one of %s"
+            % (path.suffix, ", ".join(sorted(AUDIO_IMPORT_SUFFIXES)))
+        )
+    clip_index = _non_negative_index(params.get("clip_index", 0), "clip_index")
+    track_name = params.get("track_name", "AI Vocal")
+    clip_name = params.get("clip_name", "AI Vocal Take")
+    for label, value in (("track_name", track_name), ("clip_name", clip_name)):
+        if not isinstance(value, str):
+            raise ValueError("%s must be a string" % label)
+        if len(value) > 200:
+            raise ValueError("%s must be 200 characters or fewer" % label)
+
+    # The track this lands on is wherever an append puts it, which only Live
+    # knows. Reading it back before creating is what makes the returned index
+    # true rather than assumed.
+    state = bridge.call("get_state")
+    tracks = state.get("tracks") if isinstance(state, Mapping) else None
+    track_index = len(tracks) if isinstance(tracks, list) else 0
+    bridge.call("create_track", track_type="audio", name=track_name, index=-1)
+    result = bridge.call(
+        "import_audio_clip",
+        track_index=track_index,
+        clip_index=clip_index,
+        file_path=str(path.resolve()),
+        name=clip_name,
+    )
+    return {"track_index": track_index, **(result if isinstance(result, Mapping) else {})}
+
+
 def _copy_session_clip_to_arrangement(
     bridge: SupportsBridgeCall, params: dict
 ) -> Any:
@@ -657,6 +765,8 @@ class AbletonStepExecutor:
         "apply_live_drum_kit": apply_live_drum_kit,
         "create_midi_clip": _create_midi_clip,
         "set_clip_send_envelope": _set_clip_send_envelope,
+        "set_clip_parameter_envelope": _set_clip_parameter_envelope,
+        "import_vocal_take": _import_vocal_take,
         "copy_session_clip_to_arrangement": _copy_session_clip_to_arrangement,
         "place_scene": _place_scene,
     }
