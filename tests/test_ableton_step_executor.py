@@ -88,6 +88,7 @@ class FakeBridge:
             "set_clip_envelope",
             "copy_session_clip_to_arrangement",
             "copy_scene_to_arrangement",
+            "import_audio_clip",
         }:
             return {"ok": True}
         raise AssertionError("unexpected bridge command: %s" % command)
@@ -110,6 +111,8 @@ def test_executor_satisfies_step_executor_protocol():
         "apply_live_drum_kit",
         "create_midi_clip",
         "set_clip_send_envelope",
+        "set_clip_parameter_envelope",
+        "import_vocal_take",
         "copy_session_clip_to_arrangement",
         "place_scene",
     }
@@ -599,3 +602,173 @@ def test_bridge_failure_becomes_failed_step_result():
     assert not result.succeeded
     assert result.results[0].status is StepStatus.FAILED
     assert "bridge boom" in result.results[0].error
+
+
+# --- device-parameter envelopes ---------------------------------------------------
+
+
+def test_parameter_envelope_targets_a_device_not_a_send():
+    """Both envelope kinds share one bridge command; the target is what differs."""
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+    steps = [{"start": 0, "length": 16, "value": 55.0}]
+
+    executor.execute(
+        JobStep(
+            "00_env",
+            "set_clip_parameter_envelope",
+            {
+                "track_index": 1,
+                "clip_index": 0,
+                "device_index": 0,
+                "parameter_index": 1,
+                "steps": steps,
+            },
+        )
+    )
+
+    assert bridge.calls == [
+        (
+            "set_clip_envelope",
+            {
+                "track_index": 1,
+                "clip_index": 0,
+                "device_index": 0,
+                "parameter_index": 1,
+                "steps": steps,
+            },
+        )
+    ]
+
+
+def test_a_parameter_value_outside_zero_to_one_is_allowed():
+    """A Drum Rack gain runs 0..127. Only Live knows the range, so only Live checks it."""
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "00_env",
+            "set_clip_parameter_envelope",
+            {
+                "track_index": 1,
+                "clip_index": 0,
+                "device_index": 0,
+                "parameter_index": 1,
+                "steps": [{"start": 0, "length": 8, "value": 75.0}],
+            },
+        )
+    )
+
+    assert bridge.calls[0][1]["steps"][0]["value"] == 75.0
+
+
+def test_a_send_value_outside_zero_to_one_is_still_refused():
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    with pytest.raises(ValueError):
+        executor.execute(
+            JobStep(
+                "00_send",
+                "set_clip_send_envelope",
+                {
+                    "track_index": 1,
+                    "clip_index": 0,
+                    "send_index": 0,
+                    "steps": [{"start": 0, "length": 8, "value": 75.0}],
+                },
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        [],
+        [{"start": -1, "length": 8, "value": 1.0}],
+        [{"start": 0, "length": 0, "value": 1.0}],
+        [{"start": 0, "length": 8, "value": float("inf")}],
+    ],
+)
+def test_a_malformed_parameter_envelope_is_refused(steps):
+    executor = AbletonStepExecutor(FakeBridge())
+
+    with pytest.raises(ValueError):
+        executor.execute(
+            JobStep(
+                "00_env",
+                "set_clip_parameter_envelope",
+                {
+                    "track_index": 1,
+                    "clip_index": 0,
+                    "device_index": 0,
+                    "parameter_index": 1,
+                    "steps": steps,
+                },
+            )
+        )
+
+
+# --- imported audio ---------------------------------------------------------------
+
+
+def test_import_creates_its_own_track_and_reports_where_it_landed(tmp_path):
+    audio = tmp_path / "groove-a.wav"
+    audio.write_bytes(b"RIFF....WAVEfmt ")
+    bridge = FakeBridge(tracks=[{"index": 0, "name": "1-Audio"}, {"index": 1, "name": "Drums"}])
+    executor = AbletonStepExecutor(bridge)
+
+    executor.execute(
+        JobStep(
+            "00_import",
+            "import_vocal_take",
+            {
+                "file_path": str(audio),
+                "track_name": "KIHACHI Reference",
+                "clip_name": "groove-a (take)",
+                "clip_index": 0,
+            },
+        )
+    )
+
+    # Appended after the two tracks that existed, read back rather than assumed.
+    assert bridge.calls[2][1]["track_index"] == 2
+    assert [call[0] for call in bridge.calls] == [
+        "get_state",
+        "create_track",
+        "import_audio_clip",
+    ]
+    assert bridge.calls[1][1] == {
+        "track_type": "audio",
+        "name": "KIHACHI Reference",
+        "index": -1,
+    }
+
+
+def test_a_missing_audio_file_is_caught_before_anything_is_created(tmp_path):
+    """Preflight runs this handler too, so a missing sample stops the whole plan."""
+    bridge = FakeBridge()
+    executor = AbletonStepExecutor(bridge)
+
+    with pytest.raises(ValueError, match="does not exist"):
+        executor.execute(
+            JobStep(
+                "00_import",
+                "import_vocal_take",
+                {"file_path": str(tmp_path / "gone.wav")},
+            )
+        )
+
+    assert bridge.calls == []
+
+
+def test_an_unsupported_audio_format_is_refused(tmp_path):
+    audio = tmp_path / "groove-a.ogg"
+    audio.write_bytes(b"OggS")
+    executor = AbletonStepExecutor(FakeBridge())
+
+    with pytest.raises(ValueError, match="unsupported audio format"):
+        executor.execute(
+            JobStep("00_import", "import_vocal_take", {"file_path": str(audio)})
+        )

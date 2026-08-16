@@ -24,9 +24,17 @@ command; removing a return is a manual action in Live.
 
 KIHACHI plans enter through `jobs import-kihachi`, which is a pure preflight: it
 accepts plan version 0.1, `planned_not_applied`, the existing `set_tempo`, and only
-the six additive core operations (`create_track`, `apply_live_instrument_selection`,
+the eight additive core operations (`create_track`, `apply_live_instrument_selection`,
 `apply_live_drum_kit`, `create_midi_clip`, `set_clip_send_envelope`,
-`copy_session_clip_to_arrangement`).
+`set_clip_parameter_envelope`, `import_vocal_take`,
+`copy_session_clip_to_arrangement`). The last two were added 2026-08-16: KIHACHI's
+planner had been emitting both since before this adapter existed, so its
+`--automate`, `--reference-audio` and `--vocal-audio` flags produced plans this
+refused *in full* — correct behaviour on a set that had fallen behind what the
+planner emits. Both were already working MCP tools; only the job path was missing.
+`import_vocal_take` appends a track without saying so in its name, so it counts as
+a creation in `build_track_expectation` — miss that and a resumed plan reads the
+Set as one track ahead of itself.
 Instrument selection accepts a semantic role/genre/mood, then AbletonGPT owns the
 native-device candidates and sends `insert_first_available_instrument` to Live.
 Resume accepts one candidate-matching instrument; a different existing instrument

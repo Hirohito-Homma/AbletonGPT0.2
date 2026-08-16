@@ -1,9 +1,17 @@
 """Pure adapter from a KIHACHI arrangement plan to an AbletonGPT job plan.
 
 The adapter is intentionally narrow. It accepts the existing tempo command and the
-six additive core operations needed for a native-instrument-ready MIDI
-arrangement with send throws. Any other operation rejects the *whole* document
-before a real bridge can be opened.
+additive core operations needed for a native-instrument-ready MIDI arrangement
+with send throws, device automation and imported audio. Any other operation
+rejects the *whole* document before a real bridge can be opened.
+
+Narrow is not the same as fixed. `set_clip_parameter_envelope` and
+`import_vocal_take` were outside this set until 2026-08-16, while KIHACHI's
+planner emitted both -- so `--automate`, `--reference-audio` and `--vocal-audio`
+built plans that were refused here in full, after the plan had been built and a
+runner gone looking for. Both were already MCP tools that worked; only the job
+path was missing. Rejecting the whole document is right, and it is why the set
+has to keep up with what the planner can emit.
 """
 
 from __future__ import annotations
@@ -25,6 +33,8 @@ KIHACHI_CORE_COMMANDS = frozenset(
         "apply_live_drum_kit",
         "create_midi_clip",
         "set_clip_send_envelope",
+        "set_clip_parameter_envelope",
+        "import_vocal_take",
         "copy_session_clip_to_arrangement",
     }
 )
@@ -40,8 +50,18 @@ class _ValidationBridge:
     def __init__(self) -> None:
         self._clips: dict[tuple[int, int], dict[str, Any]] = {}
         self._devices: dict[int, list[dict[str, Any]]] = {}
+        self._tracks: list[dict[str, Any]] = []
 
     def call(self, command: str, **params: Any) -> dict[str, Any]:
+        if command == "get_state":
+            # Only the count is read, by `import_vocal_take` working out where an
+            # appended track lands. Preflight cannot know the Set's real count --
+            # `verify_track_baseline` checks that against Live before the run --
+            # so this reports the tracks this plan has created so far.
+            return {"tracks": list(self._tracks)}
+        if command == "create_track":
+            self._tracks.append({"name": params.get("name", "")})
+            return {}
         if command == "get_track_devices":
             return {"devices": list(self._devices.get(params["track_index"], []))}
         if command == "insert_first_available_instrument":

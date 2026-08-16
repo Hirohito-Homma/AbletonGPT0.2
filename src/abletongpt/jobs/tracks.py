@@ -27,9 +27,17 @@ TRACK_TARGETING_COMMANDS = frozenset(
         "apply_live_drum_kit",
         "create_midi_clip",
         "set_clip_send_envelope",
+        "set_clip_parameter_envelope",
         "copy_session_clip_to_arrangement",
     }
 )
+
+#: Commands that append a track. ``import_vocal_take`` does not say so in its
+#: name: it creates the audio track it imports onto. Counting it matters on
+#: resume, where the expected track count is the base index plus the creations
+#: already done -- miss it and a resumed plan reads the Set as one track ahead
+#: of itself and refuses to continue.
+TRACK_CREATING_COMMANDS = frozenset({"create_track", "import_vocal_take"})
 
 
 class TrackBaselineMismatch(RuntimeError):
@@ -80,7 +88,7 @@ def build_track_expectation(
     creates = 0
     creates_done = 0
     for step in plan.steps:
-        if step.command == "create_track":
+        if step.command in TRACK_CREATING_COMMANDS:
             if not _appends(step):
                 return None
             creates += 1

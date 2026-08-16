@@ -154,3 +154,50 @@ def test_a_malformed_state_is_refused_rather_than_assumed_safe():
 
     with pytest.raises(TrackBaselineMismatch, match="did not report a track list"):
         verify_track_baseline(_Broken(), build_track_expectation(plan))
+
+
+def _import(step_id: str) -> JobStep:
+    return JobStep(
+        step_id,
+        "import_vocal_take",
+        {"file_path": "/tmp/groove-a.wav", "track_name": "KIHACHI Reference"},
+    )
+
+
+def test_an_imported_take_counts_as_a_created_track():
+    """It appends one, and its name does not say so. Missing it breaks resume."""
+    plan = _plan(_create("a"), _import("b"), _clip("c", 3))
+
+    expectation = build_track_expectation(plan)
+
+    assert expectation.creates == 2
+
+
+def test_resume_after_an_import_expects_the_track_it_appended():
+    plan = _plan(_create("a"), _import("b"), _clip("c", 3))
+
+    expectation = build_track_expectation(plan, completed_step_ids=["a", "b"])
+
+    assert expectation.creates_done == 2
+    # Two tracks already appended, so the Set should now hold base + 2.
+    assert expectation.expected_track_count == 5
+    verify_track_baseline(_Bridge(5), expectation)
+
+
+def test_a_parameter_envelope_targets_a_track_the_plan_must_own():
+    envelope = JobStep(
+        "b",
+        "set_clip_parameter_envelope",
+        {
+            "track_index": 2,
+            "clip_index": 0,
+            "device_index": 0,
+            "parameter_index": 1,
+            "steps": [{"start": 0, "length": 4, "value": 55.0}],
+        },
+    )
+    plan = _plan(_create("a"), envelope, _clip("c", 4))
+
+    expectation = build_track_expectation(plan)
+
+    assert expectation.base_index == 2
