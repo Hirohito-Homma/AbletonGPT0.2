@@ -11,6 +11,7 @@
 - Native Live device insertion on Live 12.3+
 - Role/genre/mood/edition-aware native-instrument selection with safe fallback
 - Existing device inspection and parameter control
+- Guarded selective device repair (`repair_live_device`) and Session MIDI clip repair (`repair_live_session_midi_clip`)
 - AI vocal guide planning and rendered-audio import
 - Offline WAV/AIFF analysis for Integrated/Momentary/Short-term LUFS, LRA, peak, RMS and crest factor
 - Read-only Main-export manifests with exact manual Save/Export settings, naming and overwrite warnings

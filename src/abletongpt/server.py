@@ -18,6 +18,7 @@ from .delivery import (
     verify_audio_export_report,
     wait_for_stable_audio_file,
 )
+from .clip_repair import repair_live_session_midi_clip as run_guarded_clip_repair
 from .device_repair import repair_live_device as run_guarded_device_repair
 from .audio import (
     analyze_stereo_field,
@@ -145,6 +146,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "loading a browsed preset/kit onto a track (additive; refuses tracks that already have an instrument)",
             "device and effect parameter control",
             "guarded selective device repair: one approved parameter/power mutation per call with identity/state guards and Live readback",
+            "guarded selective Session MIDI clip repair: at most one empty-slot create_midi_clip per call with identity/state guards and Live readback; existing-clip rewrite is refused (candidate repairable != automatically safe)",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
             "expressive-performance planning for a MIDI clip and applying it to the clip notes (accent/swing/humanize/probability; CC automation is plan-only for now)",
@@ -196,6 +198,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "Live Set saving and Main audio export remain explicit user actions because the public Live Object Model does not expose them",
             "loudness analysis never modifies the source audio",
             "guarded device repair never inserts, deletes, replaces or reorders devices; one mutation maximum; stale or mismatched targets are refused",
+            "guarded Session MIDI clip repair never deletes clips, never rewrites Arrangement, and never chains fallback writes; one mutation maximum; a candidate repairable clip is not automatically safe",
         ],
         "external_vocal_engine_required": True,
     }
@@ -2669,6 +2672,54 @@ def repair_live_device(
     if expected_power_state is not None:
         request["expected_power_state"] = expected_power_state
     return run_guarded_device_repair(bridge, request)
+
+
+@mcp.tool()
+def repair_live_session_midi_clip(
+    track_index: int,
+    clip_index: int,
+    name: str,
+    length_beats: float,
+    notes: list[dict[str, Any]],
+    expected_slot_state: str,
+    expected_track_name: str | None = None,
+    expected_clip_name: str | None = None,
+    expected_clip_length: float | None = None,
+    expected_note_count: int | None = None,
+    expected_notes: list[dict[str, Any]] | None = None,
+    expected_note_digest: str | None = None,
+) -> dict[str, Any]:
+    """Guardedly repair exactly one Session MIDI clip.
+
+    Reads Live, validates identity and occupancy preconditions, then sends at
+    most one ``create_midi_clip`` into an empty Session slot and verifies the
+    postcondition with a second read. An already-correct existing clip is a
+    no-op. Replacing notes on an occupied slot is refused: that would require
+    clearing and recreating notes. This is not Arrangement repair and it is not
+    a generic reconciliation engine. A candidate repairable clip is not
+    automatically safe.
+    """
+    request: dict[str, Any] = {
+        "track_index": track_index,
+        "clip_index": clip_index,
+        "name": name,
+        "length_beats": length_beats,
+        "notes": notes,
+        "expected_slot_state": expected_slot_state,
+    }
+    if expected_track_name is not None:
+        request["expected_track_name"] = expected_track_name
+    if expected_clip_name is not None:
+        request["expected_clip_name"] = expected_clip_name
+    if expected_clip_length is not None:
+        request["expected_clip_length"] = expected_clip_length
+    if expected_note_count is not None:
+        request["expected_note_count"] = expected_note_count
+    if expected_notes is not None:
+        request["expected_notes"] = expected_notes
+    if expected_note_digest is not None:
+        request["expected_note_digest"] = expected_note_digest
+    return run_guarded_clip_repair(bridge, request)
 
 
 @mcp.tool()

@@ -57,6 +57,7 @@ If Live already satisfies the requested postcondition, the result is
 
 ## Exclusions
 
-Not implemented: session-clip repair, arrangement repair, track reconstruction,
+Not implemented: arrangement repair, track reconstruction,
 device insertion/replacement, multi-device or batch repair, JobPlan replay,
 KIHACHI recovery, generic reconciliation, or continuous monitoring.
+Session MIDI clip repair is a separate primitive; see [CLIP_REPAIR.md](CLIP_REPAIR.md).

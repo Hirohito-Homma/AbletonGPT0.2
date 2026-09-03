@@ -35,6 +35,7 @@ ChatGPT / Codex / MCP client
   `analysis_engine` and callers can pin one with `engine=`.
 - `src/abletongpt/delivery.py`: read-only manual export manifests and post-export delivery verification.
 - `src/abletongpt/device_repair.py`: guarded selective repair of one Live device parameter or power state (read → validate → at most one mutation → readback). See [DEVICE_REPAIR.md](DEVICE_REPAIR.md).
+- `src/abletongpt/clip_repair.py`: guarded selective repair of one Session MIDI clip (read → validate → at most one `create_midi_clip` into an empty slot → readback). Existing-clip rewrite is refused. See [CLIP_REPAIR.md](CLIP_REPAIR.md).
 - `ableton_remote_script/AbletonGPT/__init__.py`: main-thread-safe Live Object Model adapter.
 - `scripts/setup_macos.py`: dependency setup, shared-token creation, and Remote Script installation.
 
@@ -52,6 +53,7 @@ ChatGPT / Codex / MCP client
 - Loudness analysis reads a selected local audio file but never rewrites or normalizes it.
 - Parameters are range-checked, and Live-disabled or macro-controlled parameters are rejected.
 - Guarded device repair (`repair_live_device`) observes Live first, refuses a mismatched or stale target, performs at most one approved mutation (`set_device_parameter` / `reset_device_parameter` / `set_device_power`), and reports success only from a second Live read. It does not insert, delete, replace or reorder devices.
+- Guarded Session MIDI clip repair (`repair_live_session_midi_clip`) observes Live first, refuses a mismatched, stale, or occupied-when-empty target, performs at most one `create_midi_clip` into an empty Session slot, and reports success only from a second Live read. Replacing an existing clip's notes is refused: that is not a single safe mutation. A candidate repairable clip is not automatically safe. It is not Arrangement repair and it is not a generic reconciliation engine.
 
 ## Compatibility
 
