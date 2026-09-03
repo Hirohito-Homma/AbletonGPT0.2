@@ -1276,3 +1276,208 @@ def test_scene_copy_without_an_expected_length_still_preflights_normally():
         # _SceneTrack refuses to copy, which is how we know the preflight passed.
         assert "nothing may be copied" in str(exc)
     assert prepared == [0]
+
+
+# --- existing device parameter / power commands (Live-facing safety) -----------
+
+
+class _DeviceParam:
+    def __init__(
+        self,
+        name="Dry/Wet",
+        value=0.25,
+        minimum=0.0,
+        maximum=1.0,
+        default=0.0,
+        enabled=True,
+        quantized=False,
+    ):
+        self.name = name
+        self.value = value
+        self.min = minimum
+        self.max = maximum
+        self.default_value = default
+        self.is_enabled = enabled
+        self.is_quantized = quantized
+        self.value_items = ["Off", "On"]
+
+    def __str__(self):
+        return str(self.value)
+
+
+class _Device:
+    def __init__(self, name, parameters, is_active=True):
+        self.name = name
+        self.class_name = name
+        self.class_display_name = name
+        self.type = 2
+        self.is_active = is_active
+        self.parameters = list(parameters)
+
+
+class _DeviceTrack:
+    def __init__(self, name, devices):
+        self.name = name
+        self.devices = list(devices)
+
+
+class _DeviceSong:
+    def __init__(self, tracks):
+        self.tracks = list(tracks)
+
+
+def _device_surface(song):
+    module = _load_remote_script()
+    surface = module.AbletonGPTControlSurface.__new__(module.AbletonGPTControlSurface)
+    surface.song = lambda: song
+    return surface
+
+
+def _filter_song(dry_wet=None, power=None):
+    if power is None:
+        power = _DeviceParam("Device On", 1.0, 0.0, 1.0, 1.0, quantized=True)
+    if dry_wet is None:
+        dry_wet = _DeviceParam("Dry/Wet", 0.25)
+    device = _Device("Auto Filter", [power, dry_wet], is_active=bool(power.value >= 0.5))
+    return _DeviceSong([_DeviceTrack("Bass", [device])]), device, power, dry_wet
+
+
+def test_get_track_devices_reports_names_values_and_power():
+    song, device, power, dry_wet = _filter_song()
+    surface = _device_surface(song)
+
+    result = surface._execute("get_track_devices", {"track_index": 0})
+
+    assert result["track"] == "Bass"
+    assert result["devices"][0]["name"] == "Auto Filter"
+    assert result["devices"][0]["is_active"] is True
+    assert result["devices"][0]["parameters"][1]["name"] == "Dry/Wet"
+    assert result["devices"][0]["parameters"][1]["value"] == 0.25
+    assert result["devices"][0]["parameters"][0]["name"] == "Device On"
+    assert power.value == 1.0
+    assert dry_wet.value == 0.25
+    assert device.parameters[1] is dry_wet
+
+
+def test_set_device_parameter_writes_and_reads_back():
+    song, _device, _power, dry_wet = _filter_song()
+    surface = _device_surface(song)
+
+    result = surface._execute(
+        "set_device_parameter",
+        {
+            "track_index": 0,
+            "device_index": 0,
+            "parameter_index": 1,
+            "value": 0.8,
+            "normalized": False,
+        },
+    )
+
+    assert dry_wet.value == 0.8
+    assert result["parameter"]["value"] == 0.8
+
+
+def test_set_device_parameter_refuses_out_of_range_without_writing():
+    song, _device, _power, dry_wet = _filter_song()
+    surface = _device_surface(song)
+
+    try:
+        surface._execute(
+            "set_device_parameter",
+            {
+                "track_index": 0,
+                "device_index": 0,
+                "parameter_index": 1,
+                "value": 1.5,
+                "normalized": False,
+            },
+        )
+    except ValueError as exc:
+        assert "out of range" in str(exc)
+    else:
+        raise AssertionError("an out-of-range value must be refused")
+    assert dry_wet.value == 0.25
+
+
+def test_set_device_parameter_refuses_a_locked_parameter_without_writing():
+    dry_wet = _DeviceParam("Dry/Wet", 0.25, enabled=False)
+    song, _device, _power, dry_wet = _filter_song(dry_wet=dry_wet)
+    surface = _device_surface(song)
+
+    try:
+        surface._execute(
+            "set_device_parameter",
+            {
+                "track_index": 0,
+                "device_index": 0,
+                "parameter_index": 1,
+                "value": 0.8,
+            },
+        )
+    except ValueError as exc:
+        assert "locked" in str(exc)
+    else:
+        raise AssertionError("a locked parameter must be refused")
+    assert dry_wet.value == 0.25
+
+
+def test_reset_device_parameter_restores_the_default():
+    song, _device, _power, dry_wet = _filter_song()
+    surface = _device_surface(song)
+
+    result = surface._execute(
+        "reset_device_parameter",
+        {"track_index": 0, "device_index": 0, "parameter_index": 1},
+    )
+
+    assert dry_wet.value == 0.0
+    assert result["parameter"]["value"] == 0.0
+
+
+def test_reset_device_parameter_refuses_quantized_parameters():
+    power = _DeviceParam("Device On", 1.0, 0.0, 1.0, 1.0, quantized=True)
+    song, _device, power, _dry_wet = _filter_song(power=power)
+    surface = _device_surface(song)
+
+    try:
+        surface._execute(
+            "reset_device_parameter",
+            {"track_index": 0, "device_index": 0, "parameter_index": 0},
+        )
+    except ValueError as exc:
+        assert "quantized" in str(exc)
+    else:
+        raise AssertionError("a quantized parameter must be refused")
+    assert power.value == 1.0
+
+
+def test_set_device_power_writes_the_device_on_parameter():
+    song, device, power, _dry_wet = _filter_song()
+    surface = _device_surface(song)
+
+    result = surface._execute(
+        "set_device_power",
+        {"track_index": 0, "device_index": 0, "enabled": False},
+    )
+
+    assert power.value == 0.0
+    assert result["enabled"] is False
+    assert device.parameters[0] is power
+
+
+def test_set_device_power_refuses_when_the_power_parameter_is_locked():
+    power = _DeviceParam("Device On", 1.0, 0.0, 1.0, 1.0, enabled=False, quantized=True)
+    song, _device, power, _dry_wet = _filter_song(power=power)
+    surface = _device_surface(song)
+
+    try:
+        surface._execute(
+            "set_device_power",
+            {"track_index": 0, "device_index": 0, "enabled": False},
+        )
+    except ValueError as exc:
+        assert "locked" in str(exc)
+    else:
+        raise AssertionError("a locked power parameter must be refused")
+    assert power.value == 1.0

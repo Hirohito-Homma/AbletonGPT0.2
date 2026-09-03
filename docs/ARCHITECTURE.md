@@ -34,6 +34,7 @@ ChatGPT / Codex / MCP client
   otherwise; the engines differ by ~0.1 dB of true peak, so each report names its
   `analysis_engine` and callers can pin one with `engine=`.
 - `src/abletongpt/delivery.py`: read-only manual export manifests and post-export delivery verification.
+- `src/abletongpt/device_repair.py`: guarded selective repair of one Live device parameter or power state (read → validate → at most one mutation → readback). See [DEVICE_REPAIR.md](DEVICE_REPAIR.md).
 - `ableton_remote_script/AbletonGPT/__init__.py`: main-thread-safe Live Object Model adapter.
 - `scripts/setup_macos.py`: dependency setup, shared-token creation, and Remote Script installation.
 
@@ -50,6 +51,7 @@ ChatGPT / Codex / MCP client
 - Existing MIDI analysis is read-only; complementary material is created on a new track after review.
 - Loudness analysis reads a selected local audio file but never rewrites or normalizes it.
 - Parameters are range-checked, and Live-disabled or macro-controlled parameters are rejected.
+- Guarded device repair (`repair_live_device`) observes Live first, refuses a mismatched or stale target, performs at most one approved mutation (`set_device_parameter` / `reset_device_parameter` / `set_device_power`), and reports success only from a second Live read. It does not insert, delete, replace or reorder devices.
 
 ## Compatibility
 

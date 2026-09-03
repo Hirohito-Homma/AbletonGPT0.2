@@ -18,6 +18,7 @@ from .delivery import (
     verify_audio_export_report,
     wait_for_stable_audio_file,
 )
+from .device_repair import repair_live_device as run_guarded_device_repair
 from .audio import (
     analyze_stereo_field,
     detect_onsets,
@@ -143,6 +144,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "read-only Live browser navigation for presets and kits",
             "loading a browsed preset/kit onto a track (additive; refuses tracks that already have an instrument)",
             "device and effect parameter control",
+            "guarded selective device repair: one approved parameter/power mutation per call with identity/state guards and Live readback",
             "AI native-instrument selection with safe fallback",
             "existing MIDI clip analysis and complementary track generation",
             "expressive-performance planning for a MIDI clip and applying it to the clip notes (accent/swing/humanize/probability; CC automation is plan-only for now)",
@@ -193,6 +195,7 @@ def get_abletongpt_capabilities() -> dict[str, Any]:
             "no track/file deletion tools",
             "Live Set saving and Main audio export remain explicit user actions because the public Live Object Model does not expose them",
             "loudness analysis never modifies the source audio",
+            "guarded device repair never inserts, deletes, replaces or reorders devices; one mutation maximum; stale or mismatched targets are refused",
         ],
         "external_vocal_engine_required": True,
     }
@@ -2617,6 +2620,55 @@ def reset_device_parameter(
         device_index=device_index,
         parameter_index=parameter_index,
     )
+
+
+@mcp.tool()
+def repair_live_device(
+    track_index: int,
+    device_index: int,
+    operation: str,
+    parameter_index: int | None = None,
+    value: float | None = None,
+    normalized: bool = False,
+    enabled: bool | None = None,
+    expected_track_name: str | None = None,
+    expected_device_name: str | None = None,
+    expected_parameter_name: str | None = None,
+    expected_current_value: float | None = None,
+    expected_power_state: bool | None = None,
+) -> dict[str, Any]:
+    """Guardedly repair exactly one Live device parameter or power state.
+
+    Reads ``get_track_devices``, validates identity/preconditions, then sends at
+    most one of ``set_device_parameter`` / ``reset_device_parameter`` /
+    ``set_device_power`` and verifies the postcondition with a second read.
+    Refuses stale or mismatched targets without mutating. Does not insert,
+    delete, replace or reorder devices; does not repair clips, arrangement or
+    JobPlans.
+    """
+    request: dict[str, Any] = {
+        "track_index": track_index,
+        "device_index": device_index,
+        "operation": operation,
+        "normalized": normalized,
+    }
+    if parameter_index is not None:
+        request["parameter_index"] = parameter_index
+    if value is not None:
+        request["value"] = value
+    if enabled is not None:
+        request["enabled"] = enabled
+    if expected_track_name is not None:
+        request["expected_track_name"] = expected_track_name
+    if expected_device_name is not None:
+        request["expected_device_name"] = expected_device_name
+    if expected_parameter_name is not None:
+        request["expected_parameter_name"] = expected_parameter_name
+    if expected_current_value is not None:
+        request["expected_current_value"] = expected_current_value
+    if expected_power_state is not None:
+        request["expected_power_state"] = expected_power_state
+    return run_guarded_device_repair(bridge, request)
 
 
 @mcp.tool()

@@ -81,6 +81,7 @@ _IMPORT_CHECKS = (
         "abletongpt.cli.loudness",
         "abletongpt.contextual",
         "abletongpt.delivery",
+        "abletongpt.device_repair",
         "abletongpt.develop",
         "abletongpt.doctor",
         "abletongpt.drumkits",

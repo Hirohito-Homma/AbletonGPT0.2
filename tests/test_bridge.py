@@ -97,6 +97,58 @@ def test_set_normalized_device_parameter_request():
     assert result["parameter"]["normalized_value"] == 0.35
 
 
+def test_get_track_devices_request():
+    response = {
+        "track_index": 1,
+        "track": "Bass",
+        "devices": [{"index": 0, "name": "Auto Filter", "is_active": True, "parameters": []}],
+    }
+    result, request = call_with_fake_response(
+        "get_track_devices", response, track_index=1
+    )
+    assert request["command"] == "get_track_devices"
+    assert request["params"] == {"track_index": 1}
+    assert result["track"] == "Bass"
+    assert result["devices"][0]["name"] == "Auto Filter"
+
+
+def test_set_device_power_request():
+    response = {"device": "Auto Filter", "enabled": False}
+    result, request = call_with_fake_response(
+        "set_device_power",
+        response,
+        track_index=1,
+        device_index=0,
+        enabled=False,
+    )
+    assert request["params"] == {
+        "track_index": 1,
+        "device_index": 0,
+        "enabled": False,
+    }
+    assert result["enabled"] is False
+
+
+def test_reset_device_parameter_request():
+    response = {
+        "device": "Auto Filter",
+        "parameter": {"index": 2, "value": 0.0},
+    }
+    result, request = call_with_fake_response(
+        "reset_device_parameter",
+        response,
+        track_index=1,
+        device_index=0,
+        parameter_index=2,
+    )
+    assert request["params"] == {
+        "track_index": 1,
+        "device_index": 0,
+        "parameter_index": 2,
+    }
+    assert result["parameter"]["value"] == 0.0
+
+
 def test_add_native_device_request():
     response = {
         "track": "Vocal",
