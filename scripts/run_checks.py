@@ -79,6 +79,7 @@ _IMPORT_CHECKS = (
         "abletongpt.composition",
         "abletongpt.config",
         "abletongpt.cli.loudness",
+        "abletongpt.clip_repair",
         "abletongpt.contextual",
         "abletongpt.delivery",
         "abletongpt.device_repair",
