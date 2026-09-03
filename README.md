@@ -11,6 +11,7 @@ AbletonGPT は、以下のようなワークフローを支援します。
 - 進行・コード・テンポ・キー・ムードの構成案生成
 - MIDI トラック / クリップ / インストゥルメントの自動作成
 - Live でのトラック・デバイス・パラメータ操作
+- 1回1パラメータのガード付きデバイス修復（`repair_live_device`：読み取り → 検証 → 高々1回の書き込み → 読み戻し）
 - MIDI の表現付け（swing / humanize / accent）
 - LUFS / LRA / peak / RMS のオフライン分析
 - 書き出しの受け渡しと検証（`plan_audio_export` / `wait_for_audio_export` / `verify_audio_export`）。
