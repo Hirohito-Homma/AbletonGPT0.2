@@ -1,6 +1,8 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
+import hashlib
 import json
+import math
 import os
 import platform
 import socket
@@ -35,6 +37,11 @@ DEVICE_TYPE_INSTRUMENT = 1
 # hang until its own socket timeout. No legitimate Remote Script command needs
 # anywhere near this long -- the heavy pure-Python work lives in the MCP server.
 DEFAULT_MAIN_THREAD_TIMEOUT = 30.0
+
+try:
+    STRING_TYPES = (basestring,)
+except NameError:
+    STRING_TYPES = (str,)
 
 
 def create_instance(c_instance):
@@ -346,6 +353,9 @@ class AbletonGPTControlSurface(ControlSurface):
                         "duration": float(value["duration"]),
                         "velocity": int(value.get("velocity", 100)),
                         "probability": float(value.get("probability", 1.0)),
+                        "velocity_deviation": float(value.get("velocity_deviation", 0.0)),
+                        "release_velocity": float(value.get("release_velocity", 64.0)),
+                        "mute": bool(value.get("mute", False)),
                     }
                 )
             return {
@@ -362,6 +372,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 "notes": notes,
                 "note_count": total_note_count,
                 "truncated": total_note_count > len(notes),
+                "notes_fingerprint": self._notes_fingerprint(source_notes),
             }
         if command == "apply_expression_to_clip":
             track = self._track(song, params["track_index"])
@@ -439,6 +450,27 @@ class AbletonGPTControlSurface(ControlSurface):
                 )
             if allow_note_count_change and source_note_count and not new_notes:
                 raise ValueError("note-count-changing replacement may not clear the clip")
+            source_notes_fingerprint = self._notes_fingerprint(original_source)
+            expected_source_notes_fingerprint = params.get("expected_source_notes_fingerprint")
+            if expected_source_notes_fingerprint is not None:
+                if (
+                    not isinstance(expected_source_notes_fingerprint, STRING_TYPES)
+                    or len(expected_source_notes_fingerprint) != 67
+                    or not expected_source_notes_fingerprint.startswith("v1:")
+                    or any(
+                        char not in "0123456789abcdef"
+                        for char in expected_source_notes_fingerprint[3:]
+                    )
+                ):
+                    raise ValueError(
+                        "expected_source_notes_fingerprint must be a v1 sha256 fingerprint"
+                    )
+                if source_notes_fingerprint != expected_source_notes_fingerprint:
+                    raise ValueError("source MIDI clip notes changed before apply")
+            if allow_note_count_change and expected_source_notes_fingerprint is None:
+                raise ValueError(
+                    "note-count-changing replacement requires expected_source_notes_fingerprint"
+                )
 
             # The Python Remote Script API expects actual MidiNoteSpecification
             # objects. If Live rejects the replacement after the clear, restore the
@@ -464,6 +496,7 @@ class AbletonGPTControlSurface(ControlSurface):
                 "clip": clip.name,
                 "length_beats": length,
                 "source_note_count": source_note_count,
+                "source_notes_fingerprint": source_notes_fingerprint,
                 "note_count": len(new_notes),
                 "note_count_changed": source_note_count != len(new_notes),
                 "rollback_protected": True,
@@ -1041,6 +1074,41 @@ class AbletonGPTControlSurface(ControlSurface):
             release_velocity=float(getter("release_velocity", 64.0)),
             mute=bool(getter("mute", False)),
         )
+
+    @staticmethod
+    def _notes_fingerprint(source_notes):
+        """Hash the v1 eight-attribute note snapshot shared with KIHACHI.
+
+        Numeric values are rounded to micro-units before hashing so Python and
+        JavaScript JSON encoders produce the same integer-only canonical payload.
+        """
+        rows = []
+        for note in source_notes:
+            if isinstance(note, dict):
+                getter = note.get
+            else:
+                getter = lambda name, default=None: getattr(note, name, default)
+            numeric = (
+                getter("pitch", 0),
+                getter("start_time", 0.0),
+                getter("duration", 0.0),
+                getter("velocity", 100),
+                getter("probability", 1.0),
+                getter("velocity_deviation", 0.0),
+                getter("release_velocity", 64.0),
+            )
+            row = [
+                int(value)
+                if index == 0
+                else int(math.floor(float(value) * 1000000.0 + 0.5))
+                for index, value in enumerate(numeric)
+            ]
+            row.append(1 if bool(getter("mute", False)) else 0)
+            rows.append(row)
+        encoded = json.dumps(
+            rows, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return "v1:" + hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _audio_clip_state(location, index, clip):

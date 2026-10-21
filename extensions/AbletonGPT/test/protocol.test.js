@@ -145,6 +145,10 @@ test("get_midi_clip_notes returns a readable clip payload", async () => {
   assert.equal(typeof response.result.length_beats, "number");
   assert.equal(response.result.notes.length, response.result.note_count);
   assert.equal(response.result.notes[0].pitch, 60);
+  assert.equal(
+    response.result.notes_fingerprint,
+    "v1:9f7fc6d6dac2f7bf5d82401f480860f2e1cc489ccfb7ed65a930b3d2ca15a628",
+  );
 });
 
 test("create_midi_clip records a non-destructive mutation", async () => {
@@ -198,12 +202,14 @@ test("apply_expression_to_clip rejects an implicit note-count change", async () 
 test("apply_expression_to_clip allows a reviewed note-count change", async () => {
   const provider = new MockLiveProvider();
   const disp = new Dispatcher(provider, {});
+  const source = await provider.getMidiClipNotes({ track_index: 0, clip_index: 0 });
   const response = await disp.handle({
     command: "apply_expression_to_clip",
     params: {
       track_index: 0,
       clip_index: 0,
       expected_source_note_count: 3,
+      expected_source_notes_fingerprint: source.notes_fingerprint,
       allow_note_count_change: true,
       notes: [
         { pitch: 60, start_time: 0, duration: 0.5 },
@@ -222,12 +228,16 @@ test("apply_expression_to_clip allows a reviewed note-count change", async () =>
 });
 
 test("apply_expression_to_clip rejects a stale reviewed note count", async () => {
-  const response = await dispatcher().handle({
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const source = await provider.getMidiClipNotes({ track_index: 0, clip_index: 0 });
+  const response = await disp.handle({
     command: "apply_expression_to_clip",
     params: {
       track_index: 0,
       clip_index: 0,
       expected_source_note_count: 2,
+      expected_source_notes_fingerprint: source.notes_fingerprint,
       allow_note_count_change: true,
       notes: [
         { pitch: 60, start_time: 0, duration: 0.5 },
@@ -240,12 +250,16 @@ test("apply_expression_to_clip rejects a stale reviewed note count", async () =>
 });
 
 test("apply_expression_to_clip rejects an invalid reviewed note count", async () => {
-  const response = await dispatcher().handle({
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const source = await provider.getMidiClipNotes({ track_index: 0, clip_index: 0 });
+  const response = await disp.handle({
     command: "apply_expression_to_clip",
     params: {
       track_index: 0,
       clip_index: 0,
       expected_source_note_count: 1.5,
+      expected_source_notes_fingerprint: source.notes_fingerprint,
       allow_note_count_change: true,
       notes: [
         { pitch: 60, start_time: 0, duration: 0.5 },
@@ -255,6 +269,27 @@ test("apply_expression_to_clip rejects an invalid reviewed note count", async ()
   });
   assert.equal(response.ok, false);
   assert.match(response.error, /must be a non-negative integer/);
+});
+
+test("apply_expression_to_clip rejects same-count stale note content before replacement", async () => {
+  const provider = new MockLiveProvider();
+  const disp = new Dispatcher(provider, {});
+  const source = await provider.getMidiClipNotes({ track_index: 0, clip_index: 0 });
+  provider.midiClipNotes[0].pitch = 61;
+  const response = await disp.handle({
+    command: "apply_expression_to_clip",
+    params: {
+      track_index: 0,
+      clip_index: 0,
+      expected_source_note_count: 3,
+      expected_source_notes_fingerprint: source.notes_fingerprint,
+      allow_note_count_change: true,
+      notes: source.notes,
+    },
+  });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /notes changed before apply/);
+  assert.equal(provider.appliedExpressions.length, 0);
 });
 
 test("apply_expression_to_clip rejects a bad target", async () => {

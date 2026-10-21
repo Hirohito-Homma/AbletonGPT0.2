@@ -61,9 +61,9 @@ Config (shared with the Python bridge):
 | `get_tracks` | `song.tracks` | `has_midi_input` = `track instanceof MidiTrack` |
 | `get_state` | `song.tempo` / `song.scenes` / `song.tracks` | tempo, scene count, per-track name/volume/mute/solo/arm/clip_slots. No `is_playing` or `signature` (no SDK API) |
 | `get_mix_snapshot` | `track.mixer` / `song.returnTracks` / `song.mainTrack` | per-track/return/master volume/pan/mute/solo/sends. `output_meter_level` is always `null` (no meter in the SDK); the Python snapshot builder drops it anyway |
-| `get_midi_clip_notes` | `midiClip.notes` (read) | returns the clip's notes + length/tempo; enables the read step of analyze/plan/apply |
+| `get_midi_clip_notes` | `midiClip.notes` (read) | returns notes + length/tempo and a `v1:` SHA-256 over the eight normalized note attributes; enables a content-based compare before apply |
 | `create_midi_clip` | `clipSlot.createMidiClip` + `midiClip.notes` | non-destructive: refuses a non-empty slot; carries per-note probability |
-| `apply_expression_to_clip` | `midiClip.notes` (wholesale replace) | replaces the notes of an existing MIDI clip; keeps probability; parity with the Remote Script backend |
+| `apply_expression_to_clip` | `midiClip.notes` (wholesale replace) | compares `expected_source_notes_fingerprint` before a count-changing replacement; refuses stale source notes before writing |
 | `set_tempo` | `song.tempo =` | |
 | `set_track_volume` / `set_track_pan` | `mixer.volume` / `mixer.panning` `.setValue()` | echoes the applied value |
 | `set_track_mute` / `set_track_solo` / `set_track_arm` | `track.mute` / `solo` / `arm` setters | |
@@ -72,6 +72,10 @@ Config (shared with the Python bridge):
 | `add_native_device` | `track.insertDevice(name, index)` | inserts a built-in Live device by name (`index` -1 appends); verifies one device was added. No `type`/`class_display_name` in the result (not in SDK). Third-party plug-ins are rejected by the SDK |
 | `set_device_parameter` / `reset_device_parameter` | `DeviceParameter.setValue()` | range-checked; supports `normalized`; reset refuses quantized params |
 | `set_device_power` | `device.parameters[0].setValue()` | toggles Live's "Device On" (first parameter) |
+
+### MIDI note fingerprint v1
+
+`notes_fingerprint` is `v1:` followed by the lowercase SHA-256 of compact JSON rows in clip order. Each row contains `[pitch, start_us, duration_us, velocity_us, probability_us, velocity_deviation_us, release_velocity_us, mute]`. The `_us` values are rounded half up after multiplying the source number by 1,000,000; `mute` is `0` or `1`. Missing values use Live's defaults: velocity `100`, probability `1`, velocity deviation `0`, release velocity `64`, and mute `false`. Both `get_midi_clip_notes` and `apply_expression_to_clip` use this same representation.
 | `get_selected_context` | **unsupported** | the SDK delivers selection only via context-menu commands, not as an ambient query |
 | `set_transport` (play/stop) | **unsupported** | the SDK exposes no transport control |
 

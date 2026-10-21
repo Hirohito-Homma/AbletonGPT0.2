@@ -13,6 +13,7 @@ import {
   type NoteDescription,
   Track,
 } from "@ableton-extensions/sdk";
+import { createHash } from "node:crypto";
 
 type ParameterState = {
   index: number;
@@ -33,6 +34,8 @@ export type IncomingNote = {
   duration: number;
   velocity?: number;
   probability?: number;
+  velocity_deviation?: number;
+  release_velocity?: number;
   mute?: boolean;
 };
 
@@ -50,6 +53,7 @@ export type ApplyExpressionParams = {
   length_beats?: number;
   notes?: IncomingNote[];
   expected_source_note_count?: number;
+  expected_source_notes_fingerprint?: string;
   allow_note_count_change?: boolean;
 };
 
@@ -241,9 +245,13 @@ export class SdkLiveProvider {
       duration: number;
       velocity: number;
       probability: number;
+      velocity_deviation: number;
+      release_velocity: number;
+      mute: boolean;
     }>;
     note_count: number;
     truncated: boolean;
+    notes_fingerprint: string;
   }> {
     const trackIndex = Number(params.track_index);
     const clipIndex = Number(params.clip_index);
@@ -280,6 +288,9 @@ export class SdkLiveProvider {
       duration: note.duration,
       velocity: note.velocity ?? 100,
       probability: note.probability ?? 1.0,
+      velocity_deviation: 0,
+      release_velocity: 64,
+      mute: Boolean(note.muted ?? false),
     }));
     return {
       track_index: trackIndex,
@@ -291,6 +302,7 @@ export class SdkLiveProvider {
       notes,
       note_count: clip.notes.length,
       truncated: clip.notes.length > notes.length,
+      notes_fingerprint: notesFingerprint(notes),
     };
   }
 
@@ -565,6 +577,7 @@ export class SdkLiveProvider {
     name: string;
     length_beats: number;
     source_note_count: number;
+    source_notes_fingerprint: string;
     note_count: number;
     note_count_changed: boolean;
   }> {
@@ -603,6 +616,28 @@ export class SdkLiveProvider {
     const incoming = Array.isArray(params.notes) ? params.notes : [];
     const notes = incoming.map(toNoteDescription);
     const allowNoteCountChange = params.allow_note_count_change === true;
+    const sourceNotes = clip.notes.map((note) => ({
+      pitch: note.pitch,
+      start_time: note.startTime,
+      duration: note.duration,
+      velocity: note.velocity ?? 100,
+      probability: note.probability ?? 1.0,
+      velocity_deviation: 0,
+      release_velocity: 64,
+      mute: Boolean(note.muted ?? false),
+    }));
+    const sourceNotesFingerprint = notesFingerprint(sourceNotes);
+    if (params.expected_source_notes_fingerprint != null) {
+      if (!isNotesFingerprint(params.expected_source_notes_fingerprint)) {
+        throw new Error("expected_source_notes_fingerprint must be a v1 sha256 fingerprint");
+      }
+      if (sourceNotesFingerprint !== params.expected_source_notes_fingerprint) {
+        throw new Error("source MIDI clip notes changed before apply");
+      }
+    }
+    if (allowNoteCountChange && params.expected_source_notes_fingerprint == null) {
+      throw new Error("note-count-changing replacement requires expected_source_notes_fingerprint");
+    }
     const expectedSourceNoteCount = Number(params.expected_source_note_count);
     if (
       params.expected_source_note_count != null &&
@@ -630,10 +665,43 @@ export class SdkLiveProvider {
       name: clip.name,
       length_beats: clip.duration,
       source_note_count: sourceNoteCount,
+      source_notes_fingerprint: sourceNotesFingerprint,
       note_count: notes.length,
       note_count_changed: sourceNoteCount !== notes.length,
     };
   }
+}
+
+function notesFingerprint(notes: Array<{
+  pitch: number;
+  start_time: number;
+  duration: number;
+  velocity?: number;
+  probability?: number;
+  velocity_deviation?: number;
+  release_velocity?: number;
+  mute?: boolean;
+  muted?: boolean;
+}>): string {
+  const rows = notes.map((note) => [
+    Math.trunc(Number(note.pitch)),
+    quantizeFingerprintNumber(note.start_time),
+    quantizeFingerprintNumber(note.duration),
+    quantizeFingerprintNumber(note.velocity ?? 100),
+    quantizeFingerprintNumber(note.probability ?? 1),
+    quantizeFingerprintNumber(note.velocity_deviation ?? 0),
+    quantizeFingerprintNumber(note.release_velocity ?? 64),
+    (note.mute ?? note.muted) ? 1 : 0,
+  ]);
+  return `v1:${createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex")}`;
+}
+
+function quantizeFingerprintNumber(value: number): number {
+  return Math.floor(Number(value) * 1_000_000 + 0.5);
+}
+
+function isNotesFingerprint(value: string): boolean {
+  return /^v1:[0-9a-f]{64}$/.test(value);
 }
 
 // Read a boolean getter that may not exist on every track (e.g. mainTrack has no
