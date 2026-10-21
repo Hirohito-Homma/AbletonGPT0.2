@@ -6,6 +6,8 @@
 //   - SdkLiveProvider (src/sdkLiveProvider.ts): the real adapter that drives Live through
 //     the Extensions SDK, used by the extension entry (src/extension.ts).
 
+import { createHash } from "node:crypto";
+
 export class LiveProvider {
   async getTempo() {
     throw new Error("not implemented");
@@ -238,6 +240,7 @@ export class MockLiveProvider extends LiveProvider {
       notes,
       note_count: notes.length,
       truncated: false,
+      notes_fingerprint: notesFingerprint(notes),
     };
   }
 
@@ -387,6 +390,18 @@ export class MockLiveProvider extends LiveProvider {
     const notes = Array.isArray(params.notes) ? params.notes : [];
     const sourceNoteCount = this.midiClipNotes.length;
     const allowNoteCountChange = params.allow_note_count_change === true;
+    const sourceNotesFingerprint = notesFingerprint(this.midiClipNotes);
+    if (params.expected_source_notes_fingerprint != null) {
+      if (!isNotesFingerprint(params.expected_source_notes_fingerprint)) {
+        throw new Error("expected_source_notes_fingerprint must be a v1 sha256 fingerprint");
+      }
+      if (sourceNotesFingerprint !== params.expected_source_notes_fingerprint) {
+        throw new Error("source MIDI clip notes changed before apply");
+      }
+    }
+    if (allowNoteCountChange && params.expected_source_notes_fingerprint == null) {
+      throw new Error("note-count-changing replacement requires expected_source_notes_fingerprint");
+    }
     const expectedSourceNoteCount = Number(params.expected_source_note_count);
     if (
       params.expected_source_note_count != null &&
@@ -414,10 +429,33 @@ export class MockLiveProvider extends LiveProvider {
       track_index: trackIndex,
       clip_index: clipIndex,
       source_note_count: sourceNoteCount,
+      source_notes_fingerprint: sourceNotesFingerprint,
       note_count: notes.length,
       note_count_changed: sourceNoteCount !== notes.length,
     };
     this.appliedExpressions.push(record);
     return record;
   }
+}
+
+function notesFingerprint(notes) {
+  const rows = notes.map((note) => [
+    Math.trunc(Number(note.pitch)),
+    quantizeFingerprintNumber(note.start_time),
+    quantizeFingerprintNumber(note.duration),
+    quantizeFingerprintNumber(note.velocity ?? 100),
+    quantizeFingerprintNumber(note.probability ?? 1),
+    quantizeFingerprintNumber(note.velocity_deviation ?? 0),
+    quantizeFingerprintNumber(note.release_velocity ?? 64),
+    note.mute ?? note.muted ? 1 : 0,
+  ]);
+  return `v1:${createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex")}`;
+}
+
+function quantizeFingerprintNumber(value) {
+  return Math.floor(Number(value) * 1_000_000 + 0.5);
+}
+
+function isNotesFingerprint(value) {
+  return typeof value === "string" && /^v1:[0-9a-f]{64}$/.test(value);
 }

@@ -101,6 +101,9 @@ class _Track:
 class _Song:
     def __init__(self, clip):
         self.tracks = [_Track(clip)]
+        self.tempo = 120.0
+        self.signature_numerator = 4
+        self.signature_denominator = 4
 
 
 def _surface_for(module, clip):
@@ -200,6 +203,7 @@ def test_note_edit_allows_reviewed_note_count_change():
             "clip_index": 0,
             "notes": [first, second],
             "expected_source_note_count": 1,
+            "expected_source_notes_fingerprint": module.AbletonGPTControlSurface._notes_fingerprint([original]),
             "allow_note_count_change": True,
         },
     )
@@ -225,6 +229,7 @@ def test_note_count_change_restores_source_notes_when_live_rejects_add():
                 "clip_index": 0,
                 "notes": [_note(pitch=64), _note(pitch=66)],
                 "expected_source_note_count": 1,
+                "expected_source_notes_fingerprint": module.AbletonGPTControlSurface._notes_fingerprint([original]),
                 "allow_note_count_change": True,
             },
         )
@@ -262,6 +267,91 @@ def test_note_count_change_requires_reviewed_source_count():
     assert clip.add_calls == 0
 
 
+def test_note_count_change_requires_source_content_fingerprint():
+    module = _load_remote_script()
+    original = _note(pitch=67)
+    clip = _Clip([original])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=67), _note(pitch=69)],
+                "expected_source_note_count": 1,
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "requires expected_source_notes_fingerprint" in str(exc)
+    else:
+        raise AssertionError("a reviewed source-content fingerprint must be required")
+
+    assert clip.notes == [original]
+    assert clip.add_calls == 0
+
+
+def test_note_count_change_rejects_same_count_stale_content():
+    module = _load_remote_script()
+    original = _note(pitch=67)
+    reviewed_fingerprint = module.AbletonGPTControlSurface._notes_fingerprint([original])
+    changed = _note(pitch=68)
+    clip = _Clip([changed])
+    surface = _surface_for(module, clip)
+
+    try:
+        surface._execute(
+            "apply_expression_to_clip",
+            {
+                "track_index": 0,
+                "clip_index": 0,
+                "notes": [_note(pitch=67), _note(pitch=69)],
+                "expected_source_note_count": 1,
+                "expected_source_notes_fingerprint": reviewed_fingerprint,
+                "allow_note_count_change": True,
+            },
+        )
+    except ValueError as exc:
+        assert "notes changed before apply" in str(exc)
+    else:
+        raise AssertionError("same-count changed content must be rejected")
+
+    assert clip.notes == [changed]
+    assert clip.add_calls == 0
+
+
+def test_get_midi_clip_notes_returns_v1_fingerprint_for_all_note_attributes():
+    module = _load_remote_script()
+    note = _note(pitch=67, velocity=84, probability=0.75)
+    note.update({"velocity_deviation": 3.0, "release_velocity": 51.0, "mute": True})
+    surface = _surface_for(module, _Clip([note]))
+
+    result = surface._execute("get_midi_clip_notes", {"track_index": 0, "clip_index": 0})
+
+    assert result["notes"][0]["velocity_deviation"] == 3.0
+    assert result["notes"][0]["release_velocity"] == 51.0
+    assert result["notes"][0]["mute"] is True
+    assert result["notes_fingerprint"] == module.AbletonGPTControlSurface._notes_fingerprint([note])
+
+
+def test_notes_fingerprint_matches_the_cross_runtime_v1_fixture():
+    module = _load_remote_script()
+    notes = [
+        dict(_note(pitch=60, velocity=80), duration=0.5),
+        dict(_note(pitch=62, velocity=80), start_time=0.5),
+        dict(_note(pitch=64, velocity=80), start_time=1.0),
+    ]
+    notes[1]["duration"] = 0.5
+    notes[2]["duration"] = 0.5
+
+    assert (
+        module.AbletonGPTControlSurface._notes_fingerprint(notes)
+        == "v1:9f7fc6d6dac2f7bf5d82401f480860f2e1cc489ccfb7ed65a930b3d2ca15a628"
+    )
+
+
 def test_note_count_change_rejects_stale_source_count():
     module = _load_remote_script()
     original = _note(pitch=71)
@@ -276,6 +366,7 @@ def test_note_count_change_rejects_stale_source_count():
                 "clip_index": 0,
                 "notes": [_note(pitch=71), _note(pitch=72)],
                 "expected_source_note_count": 2,
+                "expected_source_notes_fingerprint": module.AbletonGPTControlSurface._notes_fingerprint([original]),
                 "allow_note_count_change": True,
             },
         )
@@ -302,6 +393,7 @@ def test_note_count_change_rejects_invalid_source_count():
                 "clip_index": 0,
                 "notes": [_note(pitch=72), _note(pitch=74)],
                 "expected_source_note_count": 1.5,
+                "expected_source_notes_fingerprint": module.AbletonGPTControlSurface._notes_fingerprint([original]),
                 "allow_note_count_change": True,
             },
         )
@@ -328,6 +420,7 @@ def test_note_count_change_may_not_clear_nonempty_clip():
                 "clip_index": 0,
                 "notes": [],
                 "expected_source_note_count": 1,
+                "expected_source_notes_fingerprint": module.AbletonGPTControlSurface._notes_fingerprint([original]),
                 "allow_note_count_change": True,
             },
         )
